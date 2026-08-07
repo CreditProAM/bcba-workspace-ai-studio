@@ -238,44 +238,9 @@ export const ProgramEditorModal: React.FC<ProgramEditorModalProps> = ({
                   {formData.measurement.type === 'intensity' && (
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                       <h4 className="font-bold text-slate-800 mb-3 text-sm">Intensity Levels</h4>
-                      <p className="text-xs text-slate-500 mb-4">Define each level number and an optional description (e.g. Mild, Moderate, Severe). If left empty, data collection defaults to levels 1-3.</p>
-                      {(formData.measurement.intensityLevels || []).map((lvl, idx) => (
-                        <div key={idx} className="flex items-center gap-2 mb-2">
-                          <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-xs flex items-center justify-center font-bold shrink-0">{lvl.level}</span>
-                          <input
-                            type="text"
-                            value={lvl.description || ''}
-                            onChange={e => {
-                              const newLevels = [...(formData.measurement.intensityLevels || [])];
-                              newLevels[idx] = { ...newLevels[idx], description: e.target.value };
-                              setFormData({ ...formData, measurement: { ...formData.measurement, intensityLevels: newLevels } });
-                            }}
-                            placeholder="Description (optional)"
-                            className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm"
-                          />
-                          <button
-                            onClick={() => {
-                              const newLevels = [...(formData.measurement.intensityLevels || [])];
-                              newLevels.splice(idx, 1);
-                              setFormData({ ...formData, measurement: { ...formData.measurement, intensityLevels: newLevels } });
-                            }}
-                            className="text-red-400 hover:text-red-600 p-1"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        onClick={() => {
-                          const existing = formData.measurement.intensityLevels || [];
-                          const nextLevel = existing.length > 0 ? Math.max(...existing.map(l => l.level)) + 1 : 1;
-                          const newLevels = [...existing, { level: nextLevel, description: '' }];
-                          setFormData({ ...formData, measurement: { ...formData.measurement, intensityLevels: newLevels } });
-                        }}
-                        className="mt-2 text-sm font-bold text-indigo-600 flex items-center gap-1 hover:text-indigo-700"
-                      >
-                        <Plus size={16} /> Add Level
-                      </button>
+                      <p className="text-xs text-slate-500 mb-4">Level 1, 2, 3, etc. with optional descriptions.</p>
+                      {/* simplified for MVP */}
+                      <p className="text-sm font-medium text-slate-700 italic">Levels will default to 1-3 (Mild, Moderate, Severe) during data collection.</p>
                     </div>
                   )}
                 </div>

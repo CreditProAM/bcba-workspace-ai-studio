@@ -780,17 +780,10 @@ function App() {
         }
 
         if (notesView.screen === 'doc' && notesView.doc) {
-          const docId = notesView.doc.docId;
-          const docToEdit = docId
-            ? (notesView.doc.docType === 'FBA'
-                ? notesClient.assessments?.find(a => a.id === docId) || null
-                : notesClient.parentTrainingLogs?.find(l => l.id === docId) || null)
-            : null;
           return (
             <DocumentEditor
               client={notesClient}
               context={notesView.doc}
-              docToEdit={docToEdit}
               onSaveAssessment={upsertAssessment}
               onSaveParentTraining={upsertParentTrainingLog}
               onCancel={() => setNotesView({ clientId: notesClient.id, screen: 'list' })}
@@ -972,7 +965,6 @@ function App() {
       />
 
       <ClientProfilePanel
-        key={selectedClient?.id}
         client={selectedClient}
         events={events}
         servicePlans={appState.servicePlans || []}

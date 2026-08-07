@@ -9,7 +9,7 @@ import {
   Save,
   ShieldCheck,
 } from 'lucide-react';
-import { Client, SessionNote, NoteStatus, ObservedBehavior, PromptLevel, User, ServicePlan } from '../../types';
+import { Client, SessionNote, NoteStatus, ObservedBehavior, PromptLevel, User, ServicePlan, ClinicalProgram } from '../../types';
 import { generateSessionNarrative } from '../../services/geminiService';
 import { runDocumentationQA } from '../../services/complianceEngine';
 import { useAutoSave } from '../../hooks/useAutoSave';
@@ -85,6 +85,12 @@ export const DataCollection: React.FC<DataCollectionProps> = ({ client, activeSe
   const [note, setNote] = useState<Omit<SessionNote, 'id'> & { id?: string }>(() => noteToEdit || blankNote());
   const [showRecovery, setShowRecovery] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+    // If activeServicePlan exists but we are creating a new note (or even editing),
+    // ensure the active tab defaults logically. Let's just adjust activeTab in initial state if activeServicePlan is present,
+    // actually, let's keep it 'details' by default but we'll conditionally render tabs.
+  }, []);
 
   const handleProgramDataChange = (programId: string, programName: string, measurementType: any, value: any) => {
     update(prev => {
@@ -240,23 +246,9 @@ export const DataCollection: React.FC<DataCollectionProps> = ({ client, activeSe
             <div className="border-b border-slate-200 -mx-6 px-6">
               <nav className="flex gap-6 overflow-x-auto">
                 {(() => {
-                  // Skill Acquisition / Observed Behaviors tabs are the legacy
-                  // (pre-Service-Plan) data entry path. Once a client has an
-                  // active Service Plan, the Active Programs tab is the primary
-                  // way to record data -- but if the client still has legacy
-                  // goals/target behaviors on file, those tabs must stay
-                  // reachable (labeled as legacy) rather than silently
-                  // disappearing and orphaning that data.
-                  const hasLegacyGoals = (client.goals || []).length > 0;
-                  const hasLegacyBehaviors = (client.targetBehaviors || []).length > 0;
-
-                  const tabs: ('details' | 'programs' | 'skills' | 'behaviors' | 'narrative')[] = [
-                    'details',
-                    ...(activeServicePlan ? ['programs' as const] : []),
-                    ...(!activeServicePlan || hasLegacyGoals ? ['skills' as const] : []),
-                    ...(!activeServicePlan || hasLegacyBehaviors ? ['behaviors' as const] : []),
-                    'narrative',
-                  ];
+                  const tabs: ('details' | 'programs' | 'skills' | 'behaviors' | 'narrative')[] = activeServicePlan 
+                    ? ['details', 'programs', 'narrative']
+                    : ['details', 'skills', 'behaviors', 'narrative'];
 
                   return tabs.map(tab => (
                     <button
@@ -264,10 +256,10 @@ export const DataCollection: React.FC<DataCollectionProps> = ({ client, activeSe
                       onClick={() => setActiveTab(tab)}
                       className={`pb-3 text-sm font-bold whitespace-nowrap border-b-2 transition-colors ${activeTab === tab ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-400 hover:text-slate-700'}`}
                     >
-                      {tab === 'details' ? 'Details' :
+                      {tab === 'details' ? 'Details' : 
                        tab === 'programs' ? 'Active Programs' :
-                       tab === 'skills' ? (activeServicePlan ? 'Legacy: Skill Acquisition' : 'Skill Acquisition') :
-                       tab === 'behaviors' ? (activeServicePlan ? 'Legacy: Observed Behaviors' : 'Observed Behaviors') : 'Narrative'}
+                       tab === 'skills' ? 'Skill Acquisition' : 
+                       tab === 'behaviors' ? 'Observed Behaviors' : 'Narrative'}
                     </button>
                   ));
                 })()}
@@ -423,7 +415,7 @@ export const DataCollection: React.FC<DataCollectionProps> = ({ client, activeSe
                                      isSelected ? 'bg-rose-500 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-rose-200 hover:bg-rose-50'
                                    }`}
                                  >
-                                   Level {level}{configured?.description ? `: ${configured.description}` : ''}
+                                   Level {level}
                                  </button>
                                );
                             })}

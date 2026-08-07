@@ -1,0 +1,6 @@
+{
+  "name": "BCBA Workspace",
+  "description": "A BCBA's daily operating workspace: caseload, session notes with documentation QA, supervision tracking, progress data, and an AI-assisted clinical toolkit.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

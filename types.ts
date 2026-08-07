@@ -159,6 +159,15 @@ export interface ObservedBehavior {
   intensity?: 'mild' | 'moderate' | 'severe';
 }
 
+export interface SessionProgramData {
+  programId: string;
+  programNameSnapshot: string;
+  measurementType: MeasurementType;
+  value: any; // Can be number, string, array depending on measurementType
+  objectiveId?: string;
+  notes?: string;
+}
+
 export interface SessionNote {
   id: string;
   clientId: string;
@@ -169,6 +178,7 @@ export interface SessionNote {
   status: NoteStatus;
   goalsAddressed: string[]; // subset of Client.goals covered this session
   goalTallies: Record<string, number>; // { [goal]: trial/frequency count } -- skill acquisition data
+  programData?: SessionProgramData[];
   interventions: string[];
   promptLevels: Record<string, PromptLevel>; // { [goal or target]: level }
   observedBehaviors: ObservedBehavior[];

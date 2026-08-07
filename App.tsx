@@ -765,9 +765,11 @@ function App() {
 
         if (notesView.screen === 'note') {
           const noteToEdit = notesView.noteId ? notesClient.sessionNotes?.find(n => n.id === notesView.noteId) || null : null;
+          const activeServicePlan = appState.servicePlans?.find(p => p.clientId === notesClient.id && p.status === 'active');
           return (
             <DataCollection
               client={notesClient}
+              activeServicePlan={activeServicePlan}
               noteToEdit={noteToEdit}
               currentUser={currentUser}
               onSave={upsertSessionNote}

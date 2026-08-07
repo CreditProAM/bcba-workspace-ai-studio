@@ -9,7 +9,7 @@ import {
   Save,
   ShieldCheck,
 } from 'lucide-react';
-import { Client, SessionNote, NoteStatus, ObservedBehavior, PromptLevel, User } from '../../types';
+import { Client, SessionNote, NoteStatus, ObservedBehavior, PromptLevel, User, ServicePlan, ClinicalProgram } from '../../types';
 import { generateSessionNarrative } from '../../services/geminiService';
 import { runDocumentationQA } from '../../services/complianceEngine';
 import { useAutoSave } from '../../hooks/useAutoSave';
@@ -19,6 +19,7 @@ const PROMPT_LEVELS: PromptLevel[] = ['None', 'Verbal', 'Gestural', 'Modeling', 
 
 interface DataCollectionProps {
   client: Client;
+  activeServicePlan?: ServicePlan;
   noteToEdit: SessionNote | null;
   currentUser: User;
   onSave: (clientId: string, note: Omit<SessionNote, 'id'> & { id?: string }) => void;
@@ -54,9 +55,14 @@ const AIEthicsNote: React.FC = () => (
 const inputCls = "w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all disabled:opacity-60 disabled:cursor-not-allowed";
 const labelCls = "block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5";
 
-export const DataCollection: React.FC<DataCollectionProps> = ({ client, noteToEdit, currentUser, onSave, onCancel, addToast }) => {
-  const [activeTab, setActiveTab] = useState<'details' | 'skills' | 'behaviors' | 'narrative'>('details');
+export const DataCollection: React.FC<DataCollectionProps> = ({ client, activeServicePlan, noteToEdit, currentUser, onSave, onCancel, addToast }) => {
+  const [activeTab, setActiveTab] = useState<'details' | 'skills' | 'behaviors' | 'narrative' | 'programs'>('details');
   const isReviewMode = noteToEdit?.status === 'Pending Review' && currentUser.role === 'BCBA';
+
+  const activePrograms = useMemo(() => {
+    if (!activeServicePlan) return [];
+    return activeServicePlan.categories.flatMap(c => c.programs).filter(p => p.status === 'active');
+  }, [activeServicePlan]);
 
   const DRAFT_KEY = `bcba_note_draft_${client.id}_${noteToEdit?.id || 'new'}`;
 
@@ -67,6 +73,7 @@ export const DataCollection: React.FC<DataCollectionProps> = ({ client, noteToEd
     status: 'Draft',
     goalsAddressed: [],
     goalTallies: {},
+    programData: [],
     interventions: [],
     promptLevels: {},
     observedBehaviors: [],
@@ -78,6 +85,31 @@ export const DataCollection: React.FC<DataCollectionProps> = ({ client, noteToEd
   const [note, setNote] = useState<Omit<SessionNote, 'id'> & { id?: string }>(() => noteToEdit || blankNote());
   const [showRecovery, setShowRecovery] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+    // If activeServicePlan exists but we are creating a new note (or even editing),
+    // ensure the active tab defaults logically. Let's just adjust activeTab in initial state if activeServicePlan is present,
+    // actually, let's keep it 'details' by default but we'll conditionally render tabs.
+  }, []);
+
+  const handleProgramDataChange = (programId: string, programName: string, measurementType: any, value: any) => {
+    update(prev => {
+      const existing = prev.programData || [];
+      const updated = [...existing];
+      const idx = updated.findIndex(p => p.programId === programId);
+      if (idx > -1) {
+        updated[idx] = { ...updated[idx], value };
+      } else {
+        updated.push({
+          programId,
+          programNameSnapshot: programName,
+          measurementType,
+          value
+        });
+      }
+      return { ...prev, programData: updated };
+    });
+  };
 
   // One-time recovery check on mount -- distinct from the ongoing autosave below.
   useEffect(() => {
@@ -213,15 +245,24 @@ export const DataCollection: React.FC<DataCollectionProps> = ({ client, noteToEd
           <div className="lg:w-2/3 bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
             <div className="border-b border-slate-200 -mx-6 px-6">
               <nav className="flex gap-6 overflow-x-auto">
-                {(['details', 'skills', 'behaviors', 'narrative'] as const).map(tab => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`pb-3 text-sm font-bold whitespace-nowrap border-b-2 transition-colors ${activeTab === tab ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-400 hover:text-slate-700'}`}
-                  >
-                    {tab === 'details' ? 'Details' : tab === 'skills' ? 'Skill Acquisition' : tab === 'behaviors' ? 'Observed Behaviors' : 'Narrative'}
-                  </button>
-                ))}
+                {(() => {
+                  const tabs: ('details' | 'programs' | 'skills' | 'behaviors' | 'narrative')[] = activeServicePlan 
+                    ? ['details', 'programs', 'narrative']
+                    : ['details', 'skills', 'behaviors', 'narrative'];
+
+                  return tabs.map(tab => (
+                    <button
+                      key={tab}
+                      onClick={() => setActiveTab(tab)}
+                      className={`pb-3 text-sm font-bold whitespace-nowrap border-b-2 transition-colors ${activeTab === tab ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-400 hover:text-slate-700'}`}
+                    >
+                      {tab === 'details' ? 'Details' : 
+                       tab === 'programs' ? 'Active Programs' :
+                       tab === 'skills' ? 'Skill Acquisition' : 
+                       tab === 'behaviors' ? 'Observed Behaviors' : 'Narrative'}
+                    </button>
+                  ));
+                })()}
               </nav>
             </div>
 
@@ -253,6 +294,178 @@ export const DataCollection: React.FC<DataCollectionProps> = ({ client, noteToEd
                       ))}
                     </div>
                   </div>
+                </div>
+              )}
+
+              {activeTab === 'programs' && (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold text-slate-700">Active Programs</h3>
+                  {activePrograms.length === 0 && <p className="text-sm text-slate-400">No active programs found in the current Service Plan.</p>}
+                  
+                  {activePrograms.map(program => {
+                    const data = note.programData?.find(p => p.programId === program.id);
+                    const val = data?.value;
+
+                    return (
+                      <div key={program.id} className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <h4 className="font-bold text-slate-800">{program.name}</h4>
+                            <p className="text-xs text-slate-500 mt-0.5 capitalize">{program.type.replace('_', ' ')} • {program.measurement.type.replace('_', ' ')}</p>
+                          </div>
+                          {program.description && (
+                            <div className="group relative cursor-help">
+                              <Info size={16} className="text-slate-400" />
+                              <div className="absolute right-0 w-64 p-3 bg-slate-900 text-white text-xs rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 bottom-full mb-2">
+                                <p className="font-bold mb-1">Topography / Description</p>
+                                <p>{program.description}</p>
+                                {program.interventions.length > 0 && (
+                                  <div className="mt-2">
+                                    <p className="font-bold mb-1">Interventions:</p>
+                                    <ul className="list-disc pl-4 opacity-90 space-y-0.5">
+                                      {program.interventions.map((i, idx) => <li key={idx}>{i}</li>)}
+                                    </ul>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Measurement UI */}
+                        {program.measurement.type === 'frequency' && (
+                          <div className="flex items-center gap-3">
+                            <button 
+                              disabled={isReviewMode}
+                              onClick={() => handleProgramDataChange(program.id, program.name, 'frequency', Math.max(0, (val || 0) - 1))}
+                              className="w-10 h-10 rounded-lg border border-slate-300 bg-white flex items-center justify-center text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                            >-</button>
+                            <input 
+                              type="number" 
+                              value={val || 0}
+                              onChange={e => handleProgramDataChange(program.id, program.name, 'frequency', Number(e.target.value))}
+                              className={`${inputCls} w-20 text-center text-lg`} 
+                              disabled={isReviewMode}
+                            />
+                            <button 
+                              disabled={isReviewMode}
+                              onClick={() => handleProgramDataChange(program.id, program.name, 'frequency', (val || 0) + 1)}
+                              className="w-10 h-10 rounded-lg border border-indigo-200 bg-indigo-50 flex items-center justify-center text-indigo-600 hover:bg-indigo-100 disabled:opacity-50"
+                            >+</button>
+                          </div>
+                        )}
+
+                        {program.measurement.type === 'duration' && (
+                          <div className="flex items-center gap-3">
+                            <input 
+                              type="number" 
+                              placeholder="Minutes"
+                              value={val || ''}
+                              onChange={e => handleProgramDataChange(program.id, program.name, 'duration', Number(e.target.value))}
+                              className={`${inputCls} max-w-[120px]`} 
+                              disabled={isReviewMode}
+                            />
+                            <span className="text-sm font-bold text-slate-500">Minutes</span>
+                          </div>
+                        )}
+
+                        {program.measurement.type === 'percentage' && (
+                          <div className="flex items-center gap-3">
+                            <div className="w-24">
+                              <label className="text-[10px] uppercase font-bold text-slate-400">Correct</label>
+                              <input 
+                                type="number" 
+                                value={val?.correct || ''}
+                                onChange={e => handleProgramDataChange(program.id, program.name, 'percentage', { ...val, correct: Number(e.target.value) })}
+                                className={inputCls} 
+                                disabled={isReviewMode}
+                              />
+                            </div>
+                            <span className="text-xl text-slate-300 mt-4">/</span>
+                            <div className="w-24">
+                              <label className="text-[10px] uppercase font-bold text-slate-400">Total Ops</label>
+                              <input 
+                                type="number" 
+                                value={val?.total || ''}
+                                onChange={e => handleProgramDataChange(program.id, program.name, 'percentage', { ...val, total: Number(e.target.value) })}
+                                className={inputCls} 
+                                disabled={isReviewMode}
+                              />
+                            </div>
+                            <div className="ml-4 mt-4 text-xl font-bold text-indigo-600">
+                              {val?.total > 0 ? Math.round(((val?.correct || 0) / val.total) * 100) : 0}%
+                            </div>
+                          </div>
+                        )}
+
+                        {program.measurement.type === 'intensity' && (
+                          <div className="flex flex-wrap gap-2">
+                            {/* Simple MVP intensity levels if undefined in config, default to 1,2,3 */}
+                            {[1,2,3,4,5].map(level => {
+                               const configured = program.measurement.intensityLevels?.find(l => l.level === level);
+                               if (!configured && level > 3) return null; // Default to 3 levels if none specified
+                               
+                               const isSelected = val === level;
+                               return (
+                                 <button
+                                   key={level}
+                                   disabled={isReviewMode}
+                                   onClick={() => handleProgramDataChange(program.id, program.name, 'intensity', level)}
+                                   className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
+                                     isSelected ? 'bg-rose-500 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-rose-200 hover:bg-rose-50'
+                                   }`}
+                                 >
+                                   Level {level}
+                                 </button>
+                               );
+                            })}
+                          </div>
+                        )}
+
+                        {program.measurement.type === 'task_analysis' && (
+                          <div className="space-y-2 mt-2">
+                            {(program.measurement.steps || []).map((step, idx) => {
+                              const stepVal = val?.[idx] || 'none';
+                              return (
+                                <div key={idx} className="flex flex-col md:flex-row md:items-center justify-between gap-2 p-2 bg-white rounded-lg border border-slate-200">
+                                  <span className="text-sm text-slate-700 flex-1">{idx + 1}. {step}</span>
+                                  <div className="flex bg-slate-100 rounded-lg p-1 shrink-0">
+                                    <button 
+                                      disabled={isReviewMode}
+                                      onClick={() => {
+                                        const newVal = { ...(val || {}) };
+                                        newVal[idx] = 'independent';
+                                        handleProgramDataChange(program.id, program.name, 'task_analysis', newVal);
+                                      }}
+                                      className={`px-2 py-1 text-xs font-bold rounded ${stepVal === 'independent' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                    >Ind</button>
+                                    <button 
+                                      disabled={isReviewMode}
+                                      onClick={() => {
+                                        const newVal = { ...(val || {}) };
+                                        newVal[idx] = 'prompted';
+                                        handleProgramDataChange(program.id, program.name, 'task_analysis', newVal);
+                                      }}
+                                      className={`px-2 py-1 text-xs font-bold rounded ${stepVal === 'prompted' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                    >Prompt</button>
+                                    <button 
+                                      disabled={isReviewMode}
+                                      onClick={() => {
+                                        const newVal = { ...(val || {}) };
+                                        newVal[idx] = 'incorrect';
+                                        handleProgramDataChange(program.id, program.name, 'task_analysis', newVal);
+                                      }}
+                                      className={`px-2 py-1 text-xs font-bold rounded ${stepVal === 'incorrect' ? 'bg-rose-500 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                    >Inc</button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 

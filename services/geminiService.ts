@@ -235,6 +235,20 @@ export const generateSessionNarrative = async (
     .map(goal => `- ${goal} (Prompt Level: ${note.promptLevels?.[goal] || 'N/A'})`)
     .join('\n');
 
+  const programLines = (note.programData || [])
+    .map(p => {
+      let valStr = '';
+      if (p.measurementType === 'frequency' || p.measurementType === 'duration' || p.measurementType === 'intensity') {
+        valStr = String(p.value);
+      } else if (p.measurementType === 'percentage') {
+        valStr = `${p.value?.correct || 0}/${p.value?.total || 0}`;
+      } else if (p.measurementType === 'task_analysis') {
+        valStr = 'Task Analysis recorded';
+      }
+      return `- [${p.measurementType.toUpperCase()}] ${p.programNameSnapshot}: ${valStr}`;
+    })
+    .join('\n');
+
   const behaviorLines = (note.observedBehaviors || [])
     .map(b => {
       const target = client.targetBehaviors?.find(t => t.id === b.behaviorId);
@@ -253,8 +267,11 @@ export const generateSessionNarrative = async (
     Interventions Used: ${(note.interventions || []).join(', ') || 'None recorded'}
     Environmental Factors: ${note.environmentalFactors || 'None recorded'}
 
-    Goals Addressed (Goal: Prompt Level):
+    Goals Addressed (Legacy Format):
     ${goalLines || 'None recorded'}
+
+    Active Programs Tracked:
+    ${programLines || 'None recorded'}
 
     Observed Behaviors (Behavior: Frequency/Duration/Intensity):
     ${behaviorLines || 'None recorded'}

@@ -6,10 +6,12 @@ import { Activity, Info } from 'lucide-react';
 interface ClinicalProgressProps {
   clients: Client[];
   servicePlans: ServicePlan[];
+  preselectedClientId?: string;
+  hideHeader?: boolean;
 }
 
-export const ClinicalProgress: React.FC<ClinicalProgressProps> = ({ clients, servicePlans }) => {
-  const [selectedClientId, setSelectedClientId] = useState<string>('');
+export const ClinicalProgress: React.FC<ClinicalProgressProps> = ({ clients, servicePlans, preselectedClientId, hideHeader }) => {
+  const [selectedClientId, setSelectedClientId] = useState<string>(preselectedClientId || '');
   const [selectedProgramId, setSelectedProgramId] = useState<string>('');
 
   const selectedClient = useMemo(() => clients.find(c => c.id === selectedClientId) || null, [clients, selectedClientId]);
@@ -76,31 +78,35 @@ export const ClinicalProgress: React.FC<ClinicalProgressProps> = ({ clients, ser
   }, [selectedClient, selectedProgram]);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mt-8">
-      <div className="bg-slate-50 border-b border-slate-200 px-6 py-4">
-        <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-          <Activity size={20} className="text-indigo-600" />
-          Clinical Progress
-        </h2>
-      </div>
+    <div className={`bg-white ${hideHeader ? '' : 'rounded-2xl border border-slate-200 shadow-sm mt-8'} overflow-hidden`}>
+      {!hideHeader && (
+        <div className="bg-slate-50 border-b border-slate-200 px-6 py-4">
+          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+            <Activity size={20} className="text-indigo-600" />
+            Clinical Progress
+          </h2>
+        </div>
+      )}
 
-      <div className="p-6">
+      <div className={hideHeader ? '' : 'p-6'}>
         <div className="flex flex-col md:flex-row gap-6">
           {/* Controls */}
           <div className="w-full md:w-64 shrink-0 space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Select Client</label>
-              <select 
-                value={selectedClientId} 
-                onChange={e => setSelectedClientId(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg p-2.5 text-sm bg-white"
-              >
-                <option value="">-- Choose Client --</option>
-                {clients.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
+            {!preselectedClientId && (
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Select Client</label>
+                <select 
+                  value={selectedClientId} 
+                  onChange={e => setSelectedClientId(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-2.5 text-sm bg-white"
+                >
+                  <option value="">-- Choose Client --</option>
+                  {clients.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {selectedClient && (
               <div>

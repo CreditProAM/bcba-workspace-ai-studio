@@ -972,6 +972,11 @@ function App() {
         onEdit={() => selectedClient && handleEditClientClick(selectedClient)}
         onLogHours={handleSaveEvent}
         onOpenServicePlan={() => setIsServicePlanManagerOpen(true)}
+        onNavigateToNotes={(view) => {
+          setActiveTab('notes');
+          setNotesView(view);
+          setSelectedClient(null); // Optional: Close workspace when jumping to full screen notes? Or leave it open? Let's close it so they see the Notes view.
+        }}
       />
 
       {isServicePlanManagerOpen && selectedClient && (

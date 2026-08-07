@@ -1,11 +1,13 @@
 import React, { useMemo } from 'react';
 import { TrendingUp, Users, CalendarCheck2, ShieldCheck, AlertTriangle } from 'lucide-react';
-import { Client, CalendarEvent } from '../../types';
+import { Client, CalendarEvent, ServicePlan } from '../../types';
+import { ClinicalProgress } from './ClinicalProgress';
 
 interface DataOverviewProps {
   clients: Client[];
   events: CalendarEvent[];
   utilizationMetrics: { scheduled: number; total: number; percentage: number };
+  servicePlans: ServicePlan[];
 }
 
 /**
@@ -14,7 +16,7 @@ interface DataOverviewProps {
  * Per-client trend charts (ported from aba_tool_genie's Analytics/ProgressChart)
  * land here in a later phase once session-level goal data exists (see Notes/DataCollection).
  */
-export const DataOverview: React.FC<DataOverviewProps> = ({ clients, events, utilizationMetrics }) => {
+export const DataOverview: React.FC<DataOverviewProps> = ({ clients, events, utilizationMetrics, servicePlans }) => {
   const now = new Date();
 
   const stats = useMemo(() => {
@@ -104,9 +106,7 @@ export const DataOverview: React.FC<DataOverviewProps> = ({ clients, events, uti
           </div>
         )}
 
-        <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-6 text-sm text-slate-400">
-          Per-goal progress charts and session-level trend data will appear here once clinical session notes are being captured (see the Notes tab).
-        </div>
+        <ClinicalProgress clients={clients} servicePlans={servicePlans} />
       </div>
     </div>
   );

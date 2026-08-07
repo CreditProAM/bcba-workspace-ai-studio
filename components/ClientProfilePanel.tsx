@@ -199,6 +199,66 @@ export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, 
             );
           })()}
 
+          {/* Clinical Progress Preview */}
+          {(() => {
+            const activePlan = servicePlans.find(p => p.clientId === client.id && p.status === 'active');
+            if (!activePlan) return null;
+            const activePrograms = activePlan.categories.flatMap(c => c.programs).filter(p => p.status === 'active');
+            if (activePrograms.length === 0) return null;
+
+            const programsWithData = activePrograms.map(program => {
+               // find latest data
+               const notes = [...(client.sessionNotes || [])].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+               let latestVal: any = null;
+               for (let i = notes.length - 1; i >= 0; i--) {
+                  const pd = notes[i].programData?.find(p => p.programId === program.id);
+                  if (pd) {
+                     if (pd.measurementType === 'percentage') {
+                        latestVal = (pd.value?.total > 0 ? Math.round((pd.value.correct / pd.value.total) * 100) : 0) + '%';
+                     } else if (pd.measurementType === 'task_analysis') {
+                        const steps = Object.values(pd.value || {});
+                        const ind = steps.filter(s => s === 'independent').length;
+                        latestVal = (steps.length > 0 ? Math.round((ind / steps.length) * 100) : 0) + '%';
+                     } else {
+                        latestVal = pd.value;
+                     }
+                     break;
+                  }
+               }
+               return { program, latestVal };
+            }).filter(p => p.latestVal !== null).slice(0, 3);
+
+            if (programsWithData.length === 0) return null;
+
+            return (
+               <div className="bg-white rounded-2xl p-5 border border-slate-100 relative overflow-hidden shadow-sm">
+                 <div className="flex justify-between items-center mb-4 relative z-10">
+                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                     <Activity size={14} strokeWidth={1.5} /> Clinical Progress
+                   </h3>
+                   <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md">
+                     Recent
+                   </span>
+                 </div>
+                 <div className="space-y-3 relative z-10">
+                   {programsWithData.map((item, idx) => (
+                     <div key={idx} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                       <div className="flex-1 truncate pr-2">
+                         <p className="text-xs font-bold text-slate-800 truncate">{item.program.name}</p>
+                         <p className="text-[10px] text-slate-500 capitalize mt-0.5">{item.program.measurement.type.replace('_', ' ')}</p>
+                       </div>
+                       <div className="font-bold text-indigo-700 tabular-nums text-sm bg-white px-2.5 py-1 rounded-md shadow-sm border border-indigo-50/50">
+                         {item.latestVal}
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+                 {/* Background Decoration */}
+                 <div className="absolute -right-6 -bottom-6 w-24 h-24 bg-indigo-50 rounded-full blur-xl pointer-events-none"></div>
+               </div>
+            );
+          })()}
+
           {/* AI Progress Summary */}
           <div className="bg-gradient-to-br from-white to-indigo-50/50 rounded-2xl border border-indigo-100 p-5 shadow-sm relative overflow-hidden group">
             <div className="flex justify-between items-center mb-4 relative z-10">

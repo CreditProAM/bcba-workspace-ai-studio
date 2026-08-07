@@ -814,7 +814,7 @@ function App() {
             />
         );
       case 'data':
-        return <DataOverview clients={clients} events={events} utilizationMetrics={utilizationMetrics} />;
+        return <DataOverview clients={clients} events={events} utilizationMetrics={utilizationMetrics} servicePlans={appState.servicePlans || []} />;
       case 'toolkit':
         return <ToolkitHome />;
       case 'today':

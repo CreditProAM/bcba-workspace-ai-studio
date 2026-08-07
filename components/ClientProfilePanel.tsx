@@ -3,7 +3,6 @@ import React, { useState } from 'react';
 import { X, Calendar, Clock, Activity, CheckCircle2, AlertTriangle, ShieldCheck, TrendingUp, MapPin, History, Sparkles, RefreshCw, Plus, Minus, Save, FileText, ChevronRight } from 'lucide-react';
 import { Client, CalendarEvent, ServicePlan } from '../types';
 import { generateClientSummary, ClientSummary } from '../services/geminiService';
-import { getLatestProgramData, normalizeProgramValue, formatProgramValue } from '../utils/clinicalProgress';
 
 interface ClientProfilePanelProps {
   client: Client | null;
@@ -207,11 +206,25 @@ export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, 
             const activePrograms = activePlan.categories.flatMap(c => c.programs).filter(p => p.status === 'active');
             if (activePrograms.length === 0) return null;
 
-            // Latest value per program, via the same shared utility ClinicalProgress.tsx
-            // uses -- keeps the two views from silently drifting apart on the math.
             const programsWithData = activePrograms.map(program => {
-               const latest = getLatestProgramData(client.sessionNotes || [], program.id);
-               const latestVal = latest ? formatProgramValue(normalizeProgramValue(latest), program.measurement.type) : null;
+               // find latest data
+               const notes = [...(client.sessionNotes || [])].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+               let latestVal: any = null;
+               for (let i = notes.length - 1; i >= 0; i--) {
+                  const pd = notes[i].programData?.find(p => p.programId === program.id);
+                  if (pd) {
+                     if (pd.measurementType === 'percentage') {
+                        latestVal = (pd.value?.total > 0 ? Math.round((pd.value.correct / pd.value.total) * 100) : 0) + '%';
+                     } else if (pd.measurementType === 'task_analysis') {
+                        const steps = Object.values(pd.value || {});
+                        const ind = steps.filter(s => s === 'independent').length;
+                        latestVal = (steps.length > 0 ? Math.round((ind / steps.length) * 100) : 0) + '%';
+                     } else {
+                        latestVal = pd.value;
+                     }
+                     break;
+                  }
+               }
                return { program, latestVal };
             }).filter(p => p.latestVal !== null).slice(0, 3);
 

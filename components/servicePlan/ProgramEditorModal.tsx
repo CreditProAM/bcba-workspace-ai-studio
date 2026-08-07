@@ -237,64 +237,10 @@ export const ProgramEditorModal: React.FC<ProgramEditorModalProps> = ({
 
                   {formData.measurement.type === 'intensity' && (
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                      <h4 className="font-bold text-slate-800 mb-1 text-sm">Intensity Levels</h4>
-                      <p className="text-xs text-slate-500 mb-4">
-                        Levels 1-3 are always available during data collection. Give each a short
-                        description (e.g. Mild / Moderate / Severe) so whoever logs a session knows
-                        what to select. Add levels 4-5 only if this program needs them.
-                      </p>
-                      <div className="space-y-2">
-                        {([1, 2, 3, 4, 5] as const).map(level => {
-                          const levels = formData.measurement.intensityLevels || [];
-                          const configured = levels.find(l => l.level === level);
-                          if (level > 3 && !configured) return null;
-                          const defaultLabel = ['Mild', 'Moderate', 'Severe'][level - 1];
-                          return (
-                            <div key={level} className="flex items-center gap-2">
-                              <span className="w-16 shrink-0 text-xs font-bold text-slate-500">Level {level}</span>
-                              <input
-                                type="text"
-                                value={configured?.description || ''}
-                                onChange={e => {
-                                  const next = [...levels];
-                                  const idx = next.findIndex(l => l.level === level);
-                                  if (idx > -1) next[idx] = { ...next[idx], description: e.target.value };
-                                  else next.push({ level, description: e.target.value });
-                                  setFormData({ ...formData, measurement: { ...formData.measurement, intensityLevels: next } });
-                                }}
-                                placeholder={level <= 3 ? defaultLabel : 'Description...'}
-                                className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm"
-                              />
-                              {level > 3 && (
-                                <button
-                                  onClick={() => {
-                                    const next = levels.filter(l => l.level !== level);
-                                    setFormData({ ...formData, measurement: { ...formData.measurement, intensityLevels: next } });
-                                  }}
-                                  className="text-red-400 hover:text-red-600 p-1"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                      {(formData.measurement.intensityLevels || []).filter(l => l.level > 3).length < 2 && (
-                        <button
-                          onClick={() => {
-                            const levels = formData.measurement.intensityLevels || [];
-                            const nextLevel = (levels.some(l => l.level === 4) ? 5 : 4) as 4 | 5;
-                            setFormData({
-                              ...formData,
-                              measurement: { ...formData.measurement, intensityLevels: [...levels, { level: nextLevel, description: '' }] }
-                            });
-                          }}
-                          className="mt-3 text-xs font-bold text-indigo-600 flex items-center gap-1 hover:text-indigo-700"
-                        >
-                          <Plus size={14} /> Add Level
-                        </button>
-                      )}
+                      <h4 className="font-bold text-slate-800 mb-3 text-sm">Intensity Levels</h4>
+                      <p className="text-xs text-slate-500 mb-4">Level 1, 2, 3, etc. with optional descriptions.</p>
+                      {/* simplified for MVP */}
+                      <p className="text-sm font-medium text-slate-700 italic">Levels will default to 1-3 (Mild, Moderate, Severe) during data collection.</p>
                     </div>
                   )}
                 </div>

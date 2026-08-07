@@ -1,18 +1,20 @@
 
 import React, { useState } from 'react';
-import { X, Calendar, Clock, Activity, CheckCircle2, AlertTriangle, ShieldCheck, TrendingUp, MapPin, History, Sparkles, RefreshCw, Plus, Minus, Save } from 'lucide-react';
-import { Client, CalendarEvent } from '../types';
+import { X, Calendar, Clock, Activity, CheckCircle2, AlertTriangle, ShieldCheck, TrendingUp, MapPin, History, Sparkles, RefreshCw, Plus, Minus, Save, FileText, ChevronRight } from 'lucide-react';
+import { Client, CalendarEvent, ServicePlan } from '../types';
 import { generateClientSummary, ClientSummary } from '../services/geminiService';
 
 interface ClientProfilePanelProps {
   client: Client | null;
   events: CalendarEvent[];
+  servicePlans?: ServicePlan[];
   onClose: () => void;
   onEdit: () => void;
   onLogHours?: (event: CalendarEvent) => void;
+  onOpenServicePlan?: () => void;
 }
 
-export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, events, onClose, onEdit, onLogHours }) => {
+export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, events, servicePlans = [], onClose, onEdit, onLogHours, onOpenServicePlan }) => {
   const [summary, setSummary] = useState<ClientSummary | null>(null);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [manualHours, setManualHours] = useState(1.0);
@@ -155,6 +157,47 @@ export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, 
               </button>
             </div>
           </div>
+
+          {/* Service Plan Entry */}
+          {(() => {
+            const activePlan = servicePlans.find(p => p.clientId === client.id && p.status === 'active');
+            const draftPlan = servicePlans.find(p => p.clientId === client.id && p.status === 'draft');
+            const planToDisplay = activePlan || draftPlan;
+            const programCount = planToDisplay ? planToDisplay.categories.reduce((acc, cat) => acc + cat.programs.length, 0) : 0;
+            
+            return (
+              <div 
+                className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow cursor-pointer group flex items-center justify-between"
+                onClick={onOpenServicePlan}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="bg-blue-50 text-blue-600 p-2.5 rounded-xl">
+                    <FileText size={20} strokeWidth={1.5} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 group-hover:text-blue-700 transition-colors">
+                      {planToDisplay ? planToDisplay.name : 'Service Plan'}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
+                      {planToDisplay ? (
+                        <>
+                           <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider ${
+                             planToDisplay.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                           }`}>
+                             {planToDisplay.status}
+                           </span>
+                           <span>{programCount} {programCount === 1 ? 'Program' : 'Programs'}</span>
+                        </>
+                      ) : (
+                        'No active plan. Click to create.'
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight size={18} strokeWidth={1.5} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
+              </div>
+            );
+          })()}
 
           {/* AI Progress Summary */}
           <div className="bg-gradient-to-br from-white to-indigo-50/50 rounded-2xl border border-indigo-100 p-5 shadow-sm relative overflow-hidden group">

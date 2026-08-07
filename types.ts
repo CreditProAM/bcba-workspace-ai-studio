@@ -69,9 +69,58 @@ export interface ChatMessage {
   toolResult?: string;
 }
 
+export type MeasurementType = 'frequency' | 'duration' | 'percentage' | 'intensity' | 'task_analysis';
+
+export interface MeasurementConfiguration {
+  type: MeasurementType;
+  intensityLevels?: { level: number; description?: string }[]; // For intensity
+  steps?: string[]; // For task_analysis
+}
+
+export type ProgramType = 'behavior_reduction' | 'replacement' | 'skill_acquisition' | 'other';
+export type ProgramStatus = 'active' | 'mastered' | 'paused' | 'archived';
+
+export interface ProgramObjective {
+  id: string;
+  name: string;
+  status: ProgramStatus;
+}
+
+export interface ClinicalProgram {
+  id: string;
+  name: string;
+  type: ProgramType;
+  description: string;
+  status: ProgramStatus;
+  measurement: MeasurementConfiguration;
+  baseline: { date: string; value: string }[];
+  objectives: ProgramObjective[];
+  antecedents: string[];
+  interventions: string[];
+  recommendations?: string;
+}
+
+export interface ProgramCategory {
+  id: string;
+  name: string;
+  programs: ClinicalProgram[];
+}
+
+export interface ServicePlan {
+  id: string;
+  clientId: string;
+  name: string;
+  status: 'draft' | 'active' | 'archived';
+  startDate: string; // ISO
+  reviewDate?: string; // ISO
+  categories: ProgramCategory[];
+}
+
 export interface AppState {
   clients: Client[];
   events: CalendarEvent[];
+  servicePlans?: ServicePlan[];
+  programLibrary?: ClinicalProgram[];
 }
 
 export interface ActivityLogEntry {

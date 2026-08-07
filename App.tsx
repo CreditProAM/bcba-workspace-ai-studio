@@ -13,6 +13,7 @@ import { EventModal } from './components/EventModal';
 import { ClientModal } from './components/ClientModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ClientProfilePanel } from './components/ClientProfilePanel';
+import { ServicePlanManagerModal } from './components/servicePlan/ServicePlanManagerModal';
 import { CommandPalette } from './components/CommandPalette';
 import { ContextMenu, ContextMenuCoords, ContextMenuType } from './components/ContextMenu';
 import { AuthScreen } from './components/AuthScreen';
@@ -23,7 +24,7 @@ import { DocumentEditor, DocContext } from './components/notes/DocumentEditor';
 import { DataOverview } from './components/data/DataOverview';
 import { ToolkitHome } from './components/toolkit/ToolkitHome';
 import { INITIAL_CLIENTS, INITIAL_EVENTS } from './constants';
-import { CalendarEvent, Client, CalendarView, AppState, ActivityLogEntry, User, SessionNote, Assessment, ParentTrainingLog } from './types';
+import { CalendarEvent, Client, CalendarView, AppState, ActivityLogEntry, User, SessionNote, Assessment, ParentTrainingLog, ServicePlan, ClinicalProgram } from './types';
 import { useHistory } from './hooks/useHistory';
 import { useAutoSave } from './hooks/useAutoSave';
 import { Bell, X, ShieldCheck, Clipboard, Sparkles, CheckCircle2 } from 'lucide-react';
@@ -89,7 +90,9 @@ function App() {
              ...e,
              start: new Date(e.start),
              end: new Date(e.end)
-          }))
+          })),
+          servicePlans: parsed.servicePlans || [],
+          programLibrary: parsed.programLibrary || []
         };
       }
 
@@ -104,7 +107,9 @@ function App() {
              ...e,
              start: new Date(e.start),
              end: new Date(e.end)
-          }))
+          })),
+          servicePlans: parsed.servicePlans || [],
+          programLibrary: parsed.programLibrary || []
         };
       }
 
@@ -285,7 +290,37 @@ function App() {
 
   // New Overlays
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isServicePlanManagerOpen, setIsServicePlanManagerOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ type: ContextMenuType, coords: ContextMenuCoords, data: any } | null>(null);
+
+  const handleSaveServicePlan = (plan: ServicePlan) => {
+    const existing = (appState.servicePlans || []);
+    const idx = existing.findIndex(p => p.id === plan.id);
+    let updated;
+    if (idx > -1) {
+      updated = [...existing];
+      updated[idx] = plan;
+    } else {
+      updated = [...existing, plan];
+    }
+    setAppState({ ...appState, servicePlans: updated });
+    logActivity(idx > -1 ? 'UPDATE' : 'CREATE', 'CLIENT', `Updated Service Plan for client`, plan.clientId);
+    addToast('Service Plan Saved', 'The service plan has been updated.', <CheckCircle2 size={20} className="text-emerald-500" />);
+  };
+
+  const handleSaveProgramToLibrary = (program: ClinicalProgram) => {
+    const existing = (appState.programLibrary || []);
+    const idx = existing.findIndex(p => p.id === program.id);
+    let updated;
+    if (idx > -1) {
+      updated = [...existing];
+      updated[idx] = program;
+    } else {
+      updated = [...existing, program];
+    }
+    setAppState({ ...appState, programLibrary: updated });
+    addToast('Template Saved', 'Program saved to the local library.', <CheckCircle2 size={20} className="text-emerald-500" />);
+  };
 
   // Clipboard State
   const [clipboard, setClipboard] = useState<CalendarEvent | null>(null);
@@ -930,10 +965,24 @@ function App() {
       <ClientProfilePanel
         client={selectedClient}
         events={events}
+        servicePlans={appState.servicePlans || []}
         onClose={() => setSelectedClient(null)}
         onEdit={() => selectedClient && handleEditClientClick(selectedClient)}
         onLogHours={handleSaveEvent}
+        onOpenServicePlan={() => setIsServicePlanManagerOpen(true)}
       />
+
+      {isServicePlanManagerOpen && selectedClient && (
+        <ServicePlanManagerModal
+          isOpen={isServicePlanManagerOpen}
+          onClose={() => setIsServicePlanManagerOpen(false)}
+          client={selectedClient}
+          servicePlans={appState.servicePlans || []}
+          programLibrary={appState.programLibrary || []}
+          onSavePlan={handleSaveServicePlan}
+          onSaveLibraryProgram={handleSaveProgramToLibrary}
+        />
+      )}
 
       <CommandPalette
         isOpen={isCommandPaletteOpen}

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { X, Calendar, Clock, Activity, CheckCircle2, AlertTriangle, ShieldCheck, TrendingUp, MapPin, History, Sparkles, RefreshCw, Plus, Minus, Save, FileText, ChevronRight, FilePlus2, ClipboardList, Users } from 'lucide-react';
-import { Client, CalendarEvent, ServicePlan, SessionNote, Assessment, ParentTrainingLog } from '../types';
+import { X, Calendar, Clock, Activity, CheckCircle2, AlertTriangle, ShieldCheck, History, Sparkles, RefreshCw, FileText, ChevronRight, FilePlus2, ClipboardList, Users } from 'lucide-react';
+import { Client, CalendarEvent, ServicePlan } from '../types';
 import { generateClientSummary, ClientSummary } from '../services/geminiService';
 import { ClinicalProgress } from './data/ClinicalProgress';
+import { deriveClinicalAttention } from '../utils/clinicalAttention';
 
 interface ClientProfilePanelProps {
   client: Client | null;
@@ -17,11 +18,10 @@ interface ClientProfilePanelProps {
 
 type WorkspaceTab = 'overview' | 'servicePlan' | 'data' | 'notes' | 'documents';
 
-export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, events, servicePlans = [], onClose, onEdit, onLogHours, onOpenServicePlan, onNavigateToNotes }) => {
+export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, events, servicePlans = [], onClose, onEdit, onOpenServicePlan, onNavigateToNotes }) => {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('overview');
   const [summary, setSummary] = useState<ClientSummary | null>(null);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
-  const [manualHours, setManualHours] = useState(1.0);
 
   if (!client) return null;
 
@@ -66,89 +66,44 @@ export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, 
     }
   };
 
-  const adjustManualHours = (delta: number) => {
-    setManualHours(prev => Math.max(0.25, prev + delta));
-  };
-
-  const handleLogHours = () => {
-    if (!onLogHours) return;
-    
-    const now = new Date();
-    const start = new Date(now);
-    start.setHours(9, 0, 0, 0); 
-    if (now.getHours() > 9) {
-        start.setHours(now.getHours(), 0, 0, 0);
-    }
-    const end = new Date(start.getTime() + manualHours * 60 * 60 * 1000);
-
-    const newEvent: CalendarEvent = {
-        id: crypto.randomUUID(),
-        title: 'Manual Supervision Log',
-        start: start,
-        end: end,
-        clientId: client.id,
-        serviceType: 'RBT Supervision',
-        location: 'Clinic',
-        description: `Manually logged ${manualHours} hours via profile panel.`
-    };
-
-    onLogHours(newEvent);
-    setManualHours(1.0);
-  };
-
   const activePlan = servicePlans.find(p => p.clientId === client.id && p.status === 'active');
   const draftPlan = servicePlans.find(p => p.clientId === client.id && p.status === 'draft');
   const planToDisplay = activePlan || draftPlan;
   
-  const pendingNotes = client.sessionNotes?.filter(n => n.status === 'Pending Review') || [];
-  const noSessionData = activePlan && (!client.sessionNotes || client.sessionNotes.length === 0);
-  const reviewDueSoon = activePlan && activePlan.reviewDate && (new Date(activePlan.reviewDate).getTime() - new Date().getTime()) < 30 * 24 * 60 * 60 * 1000;
+  const clientAttention = deriveClinicalAttention({ clients: [client], events, servicePlans }, new Date());
 
   const renderOverview = () => (
     <div className="space-y-8 animate-fade-in">
        {/* Needs Attention */}
-       {(pendingNotes.length > 0 || noSessionData || reviewDueSoon) && (
+       {clientAttention.items.length > 0 && (
          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 shadow-sm">
            <h3 className="text-xs font-bold text-amber-800 uppercase tracking-widest mb-3 flex items-center gap-2">
              <AlertTriangle size={14} strokeWidth={1.5} /> Needs Attention
            </h3>
            <div className="space-y-2">
-             {pendingNotes.map(n => (
-               <div key={n.id} className="flex justify-between items-center bg-white p-3 rounded-xl border border-amber-100 shadow-sm">
+             {clientAttention.items.map(item => (
+               <div key={item.id} className="flex justify-between items-center bg-white p-3 rounded-xl border border-amber-100 shadow-sm">
                  <div className="flex items-center gap-3">
-                   <Clock size={16} className="text-amber-500" />
+                   {item.type === 'pending_note' && <Clock size={16} className="text-amber-500" />}
+                   {item.type === 'service_plan_review' && <Calendar size={16} className="text-amber-500" />}
+                   {(item.type === 'program_no_data' || item.type === 'program_stale_data') && <Activity size={16} className="text-amber-500" />}
                    <div>
-                     <p className="text-sm font-bold text-slate-800">Session Note Pending Review</p>
-                     <p className="text-[10px] text-slate-500">{n.date}</p>
+                     <p className="text-sm font-bold text-slate-800">{item.title}</p>
+                     <p className="text-[10px] text-slate-500">{item.subtitle}</p>
                    </div>
                  </div>
-                 <button onClick={() => onNavigateToNotes?.({ clientId: client.id, screen: 'note', noteId: n.id })} className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100">Review</button>
+
+                 {item.type === 'pending_note' && (
+                   <button onClick={() => onNavigateToNotes?.({ clientId: client.id, screen: 'note', noteId: item.noteId })} className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100">Review</button>
+                 )}
+                 {item.type === 'service_plan_review' && (
+                   <button onClick={() => setActiveTab('servicePlan')} className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100">View Plan</button>
+                 )}
+                 {(item.type === 'program_no_data' || item.type === 'program_stale_data') && (
+                   <button onClick={() => setActiveTab('data')} className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100">View Data</button>
+                 )}
                </div>
              ))}
-             {noSessionData && (
-               <div className="flex justify-between items-center bg-white p-3 rounded-xl border border-amber-100 shadow-sm">
-                 <div className="flex items-center gap-3">
-                   <Activity size={16} className="text-amber-500" />
-                   <div>
-                     <p className="text-sm font-bold text-slate-800">No Session Data Yet</p>
-                     <p className="text-[10px] text-slate-500">Active Service Plan is not being tracked</p>
-                   </div>
-                 </div>
-                 <button onClick={() => setActiveTab('notes')} className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100">Start Note</button>
-               </div>
-             )}
-             {reviewDueSoon && (
-               <div className="flex justify-between items-center bg-white p-3 rounded-xl border border-amber-100 shadow-sm">
-                 <div className="flex items-center gap-3">
-                   <Calendar size={16} className="text-amber-500" />
-                   <div>
-                     <p className="text-sm font-bold text-slate-800">Service Plan Review Soon</p>
-                     <p className="text-[10px] text-slate-500">Scheduled for {activePlan.reviewDate}</p>
-                   </div>
-                 </div>
-                 <button onClick={onOpenServicePlan} className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100">Manage</button>
-               </div>
-             )}
            </div>
          </div>
        )}
@@ -519,9 +474,9 @@ export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, 
                     {tab === 'notes' && 'Session Notes'}
                     {tab === 'documents' && 'Documents'}
                     
-                    {tab === 'notes' && pendingNotes.length > 0 && (
+                    {tab === 'notes' && clientAttention.pendingNotesCount > 0 && (
                        <span className={`px-2 py-0.5 rounded-md text-[10px] ${activeTab === tab ? 'bg-indigo-500 text-white' : 'bg-amber-100 text-amber-700'}`}>
-                         {pendingNotes.length}
+                         {clientAttention.pendingNotesCount}
                        </span>
                     )}
                  </button>

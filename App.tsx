@@ -23,6 +23,7 @@ import { DataCollection } from './components/notes/DataCollection';
 import { DocumentEditor, DocContext } from './components/notes/DocumentEditor';
 import { DataOverview } from './components/data/DataOverview';
 import { ToolkitHome } from './components/toolkit/ToolkitHome';
+import { NeedsMyAttentionPanel } from './components/today/NeedsMyAttentionPanel';
 import { INITIAL_CLIENTS, INITIAL_EVENTS } from './constants';
 import { CalendarEvent, Client, CalendarView, AppState, ActivityLogEntry, User, SessionNote, Assessment, ParentTrainingLog, ServicePlan, ClinicalProgram } from './types';
 import { useHistory } from './hooks/useHistory';
@@ -819,33 +820,49 @@ function App() {
         return <ToolkitHome />;
       case 'today':
       default:
-        return view === 'month' ? (
-            <MonthView
-                currentDate={currentDate}
-                events={visibleEvents}
-                clients={clients}
-                onAddEvent={handleAddClick}
-                onEventClick={handleEventClick}
-                onEventDrop={handleEventDrop}
-                onQuickAction={handleQuickAction}
-                onSmartResolve={handleSmartResolve}
+        return (
+          <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+            <NeedsMyAttentionPanel
+              appState={appState}
+              onOpenNote={(client, noteId) => {
+                setActiveTab('notes');
+                setNotesView({ clientId: client.id, screen: 'note', noteId });
+              }}
+              onOpenClientWorkspace={(client) => {
+                setSelectedClient(client);
+              }}
             />
-        ) : (
-            <WeekView
-                currentDate={currentDate}
-                events={visibleEvents}
-                clients={clients}
-                onAddEvent={() => handleAddClick()}
-                onEventClick={handleEventClick}
-                onEventDrop={handleEventDrop}
-                onEventResize={handleEventResize}
-                onContextMenu={handleContextMenu}
-                onSmartResolve={handleSmartResolve}
-                onQuickAction={handleQuickAction}
-                mode={view as 'week' | 'day'}
-                startHour={workHours.start}
-                endHour={workHours.end}
-            />
+            <div className="flex-1 min-h-[500px]">
+              {view === 'month' ? (
+                <MonthView
+                    currentDate={currentDate}
+                    events={visibleEvents}
+                    clients={clients}
+                    onAddEvent={handleAddClick}
+                    onEventClick={handleEventClick}
+                    onEventDrop={handleEventDrop}
+                    onQuickAction={handleQuickAction}
+                    onSmartResolve={handleSmartResolve}
+                />
+              ) : (
+                <WeekView
+                    currentDate={currentDate}
+                    events={visibleEvents}
+                    clients={clients}
+                    onAddEvent={() => handleAddClick()}
+                    onEventClick={handleEventClick}
+                    onEventDrop={handleEventDrop}
+                    onEventResize={handleEventResize}
+                    onContextMenu={handleContextMenu}
+                    onSmartResolve={handleSmartResolve}
+                    onQuickAction={handleQuickAction}
+                    mode={view as 'week' | 'day'}
+                    startHour={workHours.start}
+                    endHour={workHours.end}
+                />
+              )}
+            </div>
+          </div>
         );
     }
   };

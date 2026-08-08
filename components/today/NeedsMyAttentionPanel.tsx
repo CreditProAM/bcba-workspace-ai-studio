@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, ShieldAlert, AlertCircle, ChevronDown, ChevronUp, ChevronRight, FileText, Sparkles } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, ShieldQuestion, AlertCircle, ChevronDown, ChevronUp, ChevronRight, FileText, Sparkles } from 'lucide-react';
 import { AppState, Client } from '../../types';
 import { deriveClinicalAttention, AttentionPriority, AttentionItemType } from '../../utils/clinicalAttention';
 
@@ -7,12 +7,14 @@ interface NeedsMyAttentionPanelProps {
   appState: AppState;
   onOpenNote: (client: Client, noteId: string) => void;
   onOpenClientWorkspace: (client: Client, tab?: 'overview' | 'servicePlan' | 'data') => void;
+  onViewSupervision: () => void;
 }
 
 export const NeedsMyAttentionPanel: React.FC<NeedsMyAttentionPanelProps> = ({
   appState,
   onOpenNote,
   onOpenClientWorkspace,
+  onViewSupervision,
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const [filterType, setFilterType] = useState<'all' | AttentionItemType>('all');
@@ -134,6 +136,12 @@ export const NeedsMyAttentionPanel: React.FC<NeedsMyAttentionPanelProps> = ({
               >
                 Programs ({attention.staleOrNoDataCount})
               </button>
+              <button
+                onClick={() => setFilterType('supervision_below_target')}
+                className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'supervision_below_target' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                Supervision ({attention.supervisionBelowTargetCount})
+              </button>
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -188,11 +196,14 @@ export const NeedsMyAttentionPanel: React.FC<NeedsMyAttentionPanelProps> = ({
                         ? 'bg-indigo-100 text-indigo-700'
                         : item.type === 'service_plan_review'
                         ? 'bg-amber-100 text-amber-800'
+                        : item.type === 'supervision_below_target'
+                        ? 'bg-sky-100 text-sky-700'
                         : 'bg-slate-200 text-slate-700'
                     }`}>
                       {item.type === 'pending_note' && <FileText size={16} />}
                       {item.type === 'service_plan_review' && <ShieldAlert size={16} />}
                       {(item.type === 'program_no_data' || item.type === 'program_stale_data') && <AlertCircle size={16} />}
+                      {item.type === 'supervision_below_target' && <ShieldQuestion size={16} />}
                     </div>
 
                     <div className="min-w-0">
@@ -234,6 +245,15 @@ export const NeedsMyAttentionPanel: React.FC<NeedsMyAttentionPanelProps> = ({
                         className="flex items-center gap-1 text-xs font-bold text-slate-700 bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
                       >
                         View Data <ChevronRight size={14} />
+                      </button>
+                    )}
+
+                    {item.type === 'supervision_below_target' && (
+                      <button
+                        onClick={onViewSupervision}
+                        className="flex items-center gap-1 text-xs font-bold text-sky-700 bg-sky-50 border border-sky-200/80 px-3 py-1.5 rounded-lg hover:bg-sky-100 transition-colors"
+                      >
+                        View Supervision <ChevronRight size={14} />
                       </button>
                     )}
                   </div>

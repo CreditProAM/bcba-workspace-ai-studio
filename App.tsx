@@ -528,7 +528,16 @@ function App() {
     setSelectedClient(null);
   };
 
-  const handleSaveClient = (data: { id?: string; name: string; diagnosis: string; status: Client['status']; imageUrl?: string }) => {
+  const handleSaveClient = (data: {
+    id?: string;
+    name: string;
+    diagnosis: string;
+    status: Client['status'];
+    imageUrl?: string;
+    age?: number;
+    guardian?: { name: string; contact: string };
+    authorizedHours?: number;
+  }) => {
     if (data.id) {
         const existing = clients.find(c => c.id === data.id);
         if (!existing) return;
@@ -538,7 +547,10 @@ function App() {
             diagnosis: data.diagnosis,
             status: data.status,
             imageUrl: data.imageUrl, // Persist image
-            avatar: data.name.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase()
+            avatar: data.name.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase(),
+            age: data.age,
+            guardian: data.guardian,
+            authorizedHours: data.authorizedHours !== undefined ? data.authorizedHours : existing.authorizedHours
         };
         setAppState({
             ...appState,
@@ -568,7 +580,9 @@ function App() {
             diagnosis: data.diagnosis,
             status: data.status,
             imageUrl: data.imageUrl, // Persist image
-            authorizedHours: 15
+            age: data.age,
+            guardian: data.guardian,
+            authorizedHours: data.authorizedHours !== undefined ? data.authorizedHours : 15
         };
         setAppState({
             ...appState,
@@ -849,6 +863,7 @@ function App() {
               onOpenClientWorkspace={(client, tab) => {
                 openClientWorkspace(client, tab || 'overview');
               }}
+              onViewSupervision={() => setActiveTab('supervision')}
             />
             <div className="flex-1 min-h-[500px]">
               {view === 'month' ? (

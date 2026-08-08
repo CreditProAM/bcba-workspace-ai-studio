@@ -90,6 +90,7 @@ export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, 
                    {item.type === 'pending_note' && <Clock size={16} className="text-amber-500" />}
                    {item.type === 'service_plan_review' && <Calendar size={16} className="text-amber-500" />}
                    {(item.type === 'program_no_data' || item.type === 'program_stale_data') && <Activity size={16} className="text-amber-500" />}
+                   {item.type === 'supervision_below_target' && <ShieldCheck size={16} className="text-amber-500" />}
                    <div>
                      <p className="text-sm font-bold text-slate-800">{item.title}</p>
                      <p className="text-[10px] text-slate-500">{item.subtitle}</p>

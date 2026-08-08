@@ -47,6 +47,17 @@ export function deriveClinicalAttention(appState: AppState, now: Date = new Date
     const sessionNotes = client.sessionNotes || [];
     for (const note of sessionNotes) {
       if (note.status === 'Pending Review') {
+        // NOTE ON TIMESTAMP FALLBACK: SessionNote has no dedicated
+        // "submitted for review at" timestamp in the data model -- only a
+        // date-only `date` field (the clinical session date). There is no
+        // honest way to know exactly when a note entered the review queue,
+        // so `note.date` is used here as the best available proxy. This is
+        // an approximation, not the real queue-entry time: a note dated
+        // today could have been submitted seconds ago or hours ago, and the
+        // date-only granularity means "hoursElapsed" is really closer to
+        // "calendar days since the session" than a precise duration. If a
+        // real review-submission timestamp is ever added to SessionNote,
+        // this should switch to that field instead.
         let noteTime: number;
         if (note.date) {
           const parsed = new Date(note.date);

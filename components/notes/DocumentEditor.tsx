@@ -8,6 +8,7 @@ export type DocContext = { docType: 'FBA' | 'ParentTraining'; docId?: string };
 interface DocumentEditorProps {
   client: Client;
   context: DocContext;
+  docToEdit?: Assessment | ParentTrainingLog | null;
   onSaveAssessment: (clientId: string, doc: Omit<Assessment, 'id'> & { id?: string }) => void;
   onSaveParentTraining: (clientId: string, doc: Omit<ParentTrainingLog, 'id'> & { id?: string }) => void;
   onCancel: () => void;
@@ -46,9 +47,22 @@ const blankParentTraining = (client: Client) => ({
  * Both share the same draft-recovery-on-mount + autosave-while-editing pattern
  * used by DataCollection.tsx, backed by the workspace's shared useAutoSave hook.
  */
-export const DocumentEditor: React.FC<DocumentEditorProps> = ({ client, context, onSaveAssessment, onSaveParentTraining, onCancel }) => {
+export const DocumentEditor: React.FC<DocumentEditorProps> = ({ client, context, docToEdit, onSaveAssessment, onSaveParentTraining, onCancel }) => {
   const DRAFT_KEY = `bcba_doc_draft_${client.id}_${context.docType}_${context.docId || 'new'}`;
-  const [formData, setFormData] = useState<any>(() => context.docType === 'FBA' ? blankFba() : blankParentTraining(client));
+
+  const initialFormData = () => {
+    if (docToEdit && context.docType === 'FBA') {
+      const a = docToEdit as Assessment;
+      return { id: a.id, date: a.date, summary: a.summary, targetBehavior: a.targetBehavior, antecedent: a.antecedent, consequence: a.consequence, hypothesizedFunction: a.hypothesizedFunction };
+    }
+    if (docToEdit && context.docType === 'ParentTraining') {
+      const p = docToEdit as ParentTrainingLog;
+      return { id: p.id, date: p.date, attendees: p.attendees.join(', '), topics: p.topics, caregiverResponse: p.caregiverResponse };
+    }
+    return context.docType === 'FBA' ? blankFba() : blankParentTraining(client);
+  };
+
+  const [formData, setFormData] = useState<any>(initialFormData);
   const [showRecovery, setShowRecovery] = useState<any>(null);
 
   useEffect(() => {
@@ -71,7 +85,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({ client, context,
   const handleDiscard = () => {
     localStorage.removeItem(DRAFT_KEY);
     setShowRecovery(null);
-    setFormData(context.docType === 'FBA' ? blankFba() : blankParentTraining(client));
+    setFormData(initialFormData());
   };
 
   const handleChange = (field: string, value: string) => {

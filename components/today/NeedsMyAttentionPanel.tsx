@@ -22,7 +22,17 @@ export const NeedsMyAttentionPanel: React.FC<NeedsMyAttentionPanelProps> = ({
 
   const filteredItems = useMemo(() => {
     return attention.items.filter(item => {
-      if (filterType !== 'all' && item.type !== filterType) return false;
+      if (filterType !== 'all') {
+        // The "Programs" filter button represents both program_no_data and
+        // program_stale_data together (its label/count and highlight state
+        // already combine both types) -- clicking it must match either type,
+        // not just whichever one setFilterType happened to be called with.
+        const isProgramFilter = filterType === 'program_no_data' || filterType === 'program_stale_data';
+        const matchesType = isProgramFilter
+          ? (item.type === 'program_no_data' || item.type === 'program_stale_data')
+          : item.type === filterType;
+        if (!matchesType) return false;
+      }
       if (filterPriority !== 'all' && item.priority !== filterPriority) return false;
       return true;
     });

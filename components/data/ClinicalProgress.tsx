@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { Client, ServicePlan } from '../../types';
 import { Activity } from 'lucide-react';
 import { buildProgramSeries, formatProgramValue, isPercentageMeasurement } from '../../utils/clinicalProgress';
@@ -35,6 +35,24 @@ export const ClinicalProgress: React.FC<ClinicalProgressProps> = ({ clients, ser
   }, [activePrograms, selectedProgramId]);
 
   const selectedProgram = useMemo(() => activePrograms.find(p => p.id === selectedProgramId) || null, [activePrograms, selectedProgramId]);
+
+  // Configured baseline reference (ClinicalProgram.baseline), kept entirely
+  // separate from session-derived chartData below -- it is clinical context,
+  // never plotted or treated as a session datapoint. When a program has
+  // multiple baseline entries, the most recent one is shown as "the"
+  // current baseline reference.
+  const baselineReference = useMemo(() => {
+    const points = selectedProgram?.baseline || [];
+    if (points.length === 0) return null;
+    const sorted = [...points].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const latest = sorted[sorted.length - 1];
+    const numericValue = Number(latest.value);
+    if (isNaN(numericValue)) return null;
+    return { date: latest.date, value: numericValue };
+  }, [selectedProgram]);
+
+  const formatBaselineDate = (dateStr: string) =>
+    new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
   // Aggregate program data using the shared clinicalProgress utility so this
   // matches the math used everywhere else the same data is summarized.
@@ -110,6 +128,15 @@ export const ClinicalProgress: React.FC<ClinicalProgressProps> = ({ clients, ser
                  )}
 
                  <div className="space-y-2 mt-4 pt-4 border-t border-indigo-100">
+                   {baselineReference && (
+                     <div className="flex justify-between text-xs">
+                       <span className="font-bold text-indigo-900">Baseline</span>
+                       <span className="text-indigo-700 font-bold">
+                         {formatProgramValue(baselineReference.value, selectedProgram.measurement.type)}{' '}
+                         <span className="font-normal text-indigo-700/70">({formatBaselineDate(baselineReference.date)})</span>
+                       </span>
+                     </div>
+                   )}
                    <div className="flex justify-between text-xs">
                      <span className="font-bold text-indigo-900">Total Sessions</span>
                      <span className="text-indigo-700">{chartData.length}</span>
@@ -142,15 +169,26 @@ export const ClinicalProgress: React.FC<ClinicalProgressProps> = ({ clients, ser
                 <Activity size={32} className="text-slate-300 mb-2" />
                 <p className="font-medium text-slate-500">No data collected yet</p>
                 <p className="text-sm mt-1">Data from session notes will appear here.</p>
+                {baselineReference && (
+                  <div className="mt-4 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-xs font-bold">
+                    Baseline on file: {formatProgramValue(baselineReference.value, selectedProgram.measurement.type)} ({formatBaselineDate(baselineReference.date)})
+                  </div>
+                )}
               </div>
             ) : chartData.length === 1 ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
                  <div className="text-3xl font-bold text-indigo-600 mb-1">{formatProgramValue(chartData[0].value, selectedProgram.measurement.type)}</div>
-                 <p className="text-sm font-bold text-slate-500 mb-1">Baseline / First Data Point</p>
+                 <p className="text-sm font-bold text-slate-500 mb-1">First Data Point</p>
                  <p className="text-xs">Recorded on {chartData[0].date}. Need more sessions to show a trend.</p>
+                 {baselineReference && (
+                   <div className="mt-4 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-xs font-bold">
+                     Baseline: {formatProgramValue(baselineReference.value, selectedProgram.measurement.type)} ({formatBaselineDate(baselineReference.date)})
+                   </div>
+                 )}
               </div>
             ) : (
-              <div className="h-[300px] w-full">
+              <div className="w-full">
+                <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
@@ -175,6 +213,16 @@ export const ClinicalProgress: React.FC<ClinicalProgressProps> = ({ clients, ser
                       contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
                       formatter={(value: number) => [formatProgramValue(value, selectedProgram.measurement.type), 'Value']}
                     />
+                    {baselineReference && (
+                      <ReferenceLine
+                        y={baselineReference.value}
+                        stroke="#f59e0b"
+                        strokeDasharray="5 4"
+                        strokeWidth={1.5}
+                        ifOverflow="extendDomain"
+                        label={{ value: 'Baseline', position: 'insideTopLeft', fill: '#b45309', fontSize: 11, fontWeight: 700 }}
+                      />
+                    )}
                     <Line
                       type="monotone"
                       dataKey="value"
@@ -185,6 +233,13 @@ export const ClinicalProgress: React.FC<ClinicalProgressProps> = ({ clients, ser
                     />
                   </LineChart>
                 </ResponsiveContainer>
+                </div>
+                {baselineReference && (
+                  <p className="text-[11px] text-slate-400 mt-2 flex items-center gap-1.5">
+                    <span className="inline-block w-3 border-t-2 border-dashed border-amber-500" />
+                    Baseline reference: {formatProgramValue(baselineReference.value, selectedProgram.measurement.type)} on {formatBaselineDate(baselineReference.date)} -- not a session data point.
+                  </p>
+                )}
               </div>
             )}
           </div>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, Save, BookmarkPlus, Copy, Plus, Trash2 } from 'lucide-react';
-import { ClinicalProgram, ProgramType, MeasurementType, ProgramStatus } from '../../types';
-import { formatProgramValue } from '../../utils/clinicalProgress';
+import { ClinicalProgram, ProgramType, MeasurementType, ProgramStatus, ObjectiveMasteryCriteria, MasteryComparison } from '../../types';
+import { formatProgramValue, getMeasurementUnitLabel, formatCriteriaLabel } from '../../utils/clinicalProgress';
 
 interface ProgramEditorModalProps {
   isOpen: boolean;
@@ -96,6 +96,15 @@ export const ProgramEditorModal: React.FC<ProgramEditorModalProps> = ({
     const newBaseline = [...formData.baseline];
     newBaseline.splice(idx, 1);
     setFormData({ ...formData, baseline: newBaseline });
+  };
+
+  // Objective Mastery Criteria V1 -- optional per objective. Passing
+  // `undefined` clears criteria back to the pre-existing name+status-only
+  // shape, so an objective can be un-configured just as easily as configured.
+  const updateObjectiveCriteria = (idx: number, criteria: ObjectiveMasteryCriteria | undefined) => {
+    const newObjs = [...formData.objectives];
+    newObjs[idx] = { ...newObjs[idx], masteryCriteria: criteria };
+    setFormData({ ...formData, objectives: newObjs });
   };
 
   // Same fallback used by live session data collection (DataCollection.tsx):
@@ -476,43 +485,112 @@ export const ProgramEditorModal: React.FC<ProgramEditorModalProps> = ({
                   ) : (
                     <div className="space-y-3">
                       {formData.objectives.map((obj, idx) => (
-                        <div key={obj.id} className="flex items-start gap-3 bg-white p-3 border border-slate-200 rounded-lg shadow-sm">
-                          <div className="mt-1 font-bold text-slate-400">{idx + 1}.</div>
-                          <div className="flex-1 space-y-2">
-                             <input 
-                               type="text"
-                               value={obj.name}
-                               onChange={e => {
-                                 const newObjs = [...formData.objectives];
-                                 newObjs[idx].name = e.target.value;
-                                 setFormData({...formData, objectives: newObjs});
-                               }}
-                               placeholder="Objective description..."
-                               className="w-full border-0 bg-transparent p-0 focus:ring-0 text-slate-900 font-medium"
-                             />
-                             <select 
-                               value={obj.status}
-                               onChange={e => {
-                                 const newObjs = [...formData.objectives];
-                                 newObjs[idx].status = e.target.value as ProgramStatus;
-                                 setFormData({...formData, objectives: newObjs});
-                               }}
-                               className="text-xs border border-slate-200 rounded p-1 bg-slate-50"
-                             >
-                                <option value="active">Active</option>
-                                <option value="mastered">Mastered</option>
-                             </select>
+                        <div key={obj.id} className="bg-white p-3 border border-slate-200 rounded-lg shadow-sm">
+                          <div className="flex items-start gap-3">
+                            <div className="mt-1 font-bold text-slate-400">{idx + 1}.</div>
+                            <div className="flex-1 space-y-2">
+                               <input
+                                 type="text"
+                                 value={obj.name}
+                                 onChange={e => {
+                                   const newObjs = [...formData.objectives];
+                                   newObjs[idx] = { ...newObjs[idx], name: e.target.value };
+                                   setFormData({...formData, objectives: newObjs});
+                                 }}
+                                 placeholder="Objective description..."
+                                 className="w-full border-0 bg-transparent p-0 focus:ring-0 text-slate-900 font-medium"
+                               />
+                               <select
+                                 value={obj.status}
+                                 onChange={e => {
+                                   const newObjs = [...formData.objectives];
+                                   newObjs[idx] = { ...newObjs[idx], status: e.target.value as ProgramStatus };
+                                   setFormData({...formData, objectives: newObjs});
+                                 }}
+                                 className="text-xs border border-slate-200 rounded p-1 bg-slate-50"
+                               >
+                                  <option value="active">Active</option>
+                                  <option value="mastered">Mastered</option>
+                               </select>
+                            </div>
+                            <button
+                              onClick={() => {
+                                const newObjs = [...formData.objectives];
+                                newObjs.splice(idx, 1);
+                                setFormData({...formData, objectives: newObjs});
+                              }}
+                              className="text-red-400 hover:text-red-600 p-1"
+                            >
+                              <Trash2 size={16} />
+                            </button>
                           </div>
-                          <button 
-                            onClick={() => {
-                              const newObjs = [...formData.objectives];
-                              newObjs.splice(idx, 1);
-                              setFormData({...formData, objectives: newObjs});
-                            }}
-                            className="text-red-400 hover:text-red-600 p-1"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+
+                          {/* Mastery Criteria (optional) -- an objective with no
+                              criteria configured continues behaving exactly as
+                              it always has. */}
+                          <div className="mt-3 pt-3 border-t border-slate-100 pl-7">
+                            {obj.masteryCriteria ? (
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] uppercase font-bold text-slate-400">Mastery Criteria</span>
+                                  <button
+                                    onClick={() => updateObjectiveCriteria(idx, undefined)}
+                                    className="text-[11px] font-bold text-red-400 hover:text-red-600"
+                                  >
+                                    Remove Criteria
+                                  </button>
+                                </div>
+                                <div className="flex flex-wrap items-end gap-2">
+                                  <div className="w-28">
+                                    <label className="text-[10px] uppercase font-bold text-slate-400">Comparison</label>
+                                    <select
+                                      value={obj.masteryCriteria.comparison}
+                                      onChange={e => updateObjectiveCriteria(idx, { ...obj.masteryCriteria!, comparison: e.target.value as MasteryComparison })}
+                                      className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white"
+                                    >
+                                      <option value="at_least">At least</option>
+                                      <option value="at_most">At most</option>
+                                    </select>
+                                  </div>
+                                  <div className="w-28">
+                                    <label className="text-[10px] uppercase font-bold text-slate-400">
+                                      Target ({getMeasurementUnitLabel(formData.measurement.type)})
+                                    </label>
+                                    <input
+                                      type="number"
+                                      value={obj.masteryCriteria.targetValue}
+                                      onChange={e => updateObjectiveCriteria(idx, { ...obj.masteryCriteria!, targetValue: Number(e.target.value) })}
+                                      className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                                    />
+                                  </div>
+                                  <div className="w-40">
+                                    <label className="text-[10px] uppercase font-bold text-slate-400">Consecutive Sessions</label>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      step={1}
+                                      value={obj.masteryCriteria.consecutiveSessions}
+                                      onChange={e => updateObjectiveCriteria(idx, { ...obj.masteryCriteria!, consecutiveSessions: Math.max(1, Number(e.target.value) || 1) })}
+                                      className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                                    />
+                                  </div>
+                                </div>
+                                <p className="text-xs text-indigo-600 font-bold">
+                                  {formatCriteriaLabel(obj.masteryCriteria, formData.measurement.type)}
+                                </p>
+                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                  Meeting this criterion is shown as a signal for BCBA review -- it never automatically changes this objective's status.
+                                </p>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => updateObjectiveCriteria(idx, { targetValue: 0, comparison: 'at_least', consecutiveSessions: 3 })}
+                                className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
+                              >
+                                <Plus size={14} /> Add Mastery Criteria
+                              </button>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>

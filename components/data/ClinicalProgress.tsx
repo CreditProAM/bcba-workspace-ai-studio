@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { Client, ServicePlan } from '../../types';
-import { Activity } from 'lucide-react';
-import { buildProgramSeries, formatProgramValue, isPercentageMeasurement } from '../../utils/clinicalProgress';
+import { Activity, Target, CheckCircle2 } from 'lucide-react';
+import { buildProgramSeries, formatProgramValue, isPercentageMeasurement, evaluateObjectiveCriterion, formatCriteriaLabel } from '../../utils/clinicalProgress';
 
 interface ClinicalProgressProps {
   clients: Client[];
@@ -244,6 +244,69 @@ export const ClinicalProgress: React.FC<ClinicalProgressProps> = ({ clients, ser
             )}
           </div>
         </div>
+
+        {/* Objective Mastery Criteria V1 -- deterministic criterion progress
+            only. Achieving a criterion is surfaced as a signal for BCBA
+            review; it never changes ProgramObjective.status, mastery, or the
+            Service Plan on its own. */}
+        {selectedProgram && selectedProgram.objectives.length > 0 && (
+          <div className="mt-6">
+            <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2 mb-3">
+              <Target size={16} className="text-indigo-500" /> Objective Progress
+            </h3>
+            <div className="space-y-3">
+              {selectedProgram.objectives.map(obj => {
+                if (!obj.masteryCriteria) {
+                  return (
+                    <div key={obj.id} className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-slate-800">{obj.name || 'Untitled objective'}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">No mastery criteria configured for this objective.</p>
+                      </div>
+                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full shrink-0 ${obj.status === 'mastered' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                        {obj.status}
+                      </span>
+                    </div>
+                  );
+                }
+
+                const progress = evaluateObjectiveCriterion(chartData, obj.masteryCriteria);
+                const criteriaLabel = formatCriteriaLabel(obj.masteryCriteria, selectedProgram.measurement.type);
+
+                return (
+                  <div key={obj.id} className={`border rounded-xl p-4 ${progress.achieved ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-slate-800">{obj.name || 'Untitled objective'}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">Criterion: {criteriaLabel}</p>
+                      </div>
+                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full shrink-0 ${obj.status === 'mastered' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                        {obj.status}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-6 text-xs">
+                      <div>
+                        <span className="text-slate-400 font-bold uppercase text-[10px] block">Current</span>
+                        <span className="font-bold text-slate-700">
+                          {progress.currentValue === null ? 'No data yet' : formatProgramValue(progress.currentValue, selectedProgram.measurement.type)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 font-bold uppercase text-[10px] block">Streak</span>
+                        <span className="font-bold text-slate-700">{progress.currentStreak} / {progress.requiredStreak} consecutive sessions</span>
+                      </div>
+                    </div>
+                    {progress.achieved && (
+                      <div className="mt-3 flex items-center gap-2 text-emerald-700 text-xs font-bold bg-emerald-100/60 px-3 py-2 rounded-lg">
+                        <CheckCircle2 size={14} /> Criterion achieved -- BCBA review required
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

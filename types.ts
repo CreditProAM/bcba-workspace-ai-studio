@@ -80,10 +80,28 @@ export interface MeasurementConfiguration {
 export type ProgramType = 'behavior_reduction' | 'replacement' | 'skill_acquisition' | 'other';
 export type ProgramStatus = 'active' | 'mastered' | 'paused' | 'archived';
 
+// Objective Mastery Criteria V1 -- an optional, deterministic target the BCBA
+// can configure per objective (e.g. "at least 80% for 3 consecutive
+// sessions"). This is reference criteria only: meeting it is surfaced to the
+// BCBA as "criterion achieved," never used to auto-change ProgramStatus.
+// Deliberately excludes generalization/maintenance/multi-setting criteria and
+// automatic phase changes -- out of scope for V1.
+export type MasteryComparison = 'at_least' | 'at_most';
+
+export interface ObjectiveMasteryCriteria {
+  targetValue: number;
+  comparison: MasteryComparison;
+  consecutiveSessions: number;
+}
+
 export interface ProgramObjective {
   id: string;
   name: string;
   status: ProgramStatus;
+  // Optional so existing objectives (name + status only) remain valid without
+  // any migration. When absent, the objective behaves exactly as it always
+  // has -- no criteria evaluation is attempted.
+  masteryCriteria?: ObjectiveMasteryCriteria;
 }
 
 export interface ClinicalProgram {

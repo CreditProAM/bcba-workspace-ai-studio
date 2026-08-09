@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { TrendingUp, Users, CalendarCheck2, ShieldCheck } from 'lucide-react';
+import { TrendingUp, Users, CalendarCheck2, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { Client, CalendarEvent, ServicePlan } from '../../types';
 import { ClinicalProgress } from './ClinicalProgress';
 
@@ -85,13 +85,26 @@ export const DataOverview: React.FC<DataOverviewProps> = ({ clients, events, uti
           </div>
         </div>
 
-        {/* The itemized per-client "Needs Attention" list previously here has
-            been consolidated into the shared clinical attention engine
-            (utils/clinicalAttention.ts -> Today / Needs My Attention), which
-            now surfaces the same supervision-below-target signal with the
-            same underlying calculation. Keeping a second itemized list here
-            would create two competing views of one signal, so only the
-            caseload-wide count card above (and the chart below) remain. */}
+        {stats.nonCompliant.length > 0 && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+              <AlertTriangle size={14} className="text-amber-500" /> Needs Attention
+            </h2>
+            <div className="space-y-2">
+              {stats.nonCompliant.map(({ client, percentage }) => (
+                <div key={client.id} className="flex items-center justify-between p-3 rounded-xl bg-amber-50/50 border border-amber-100">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${client.color} ${client.textColor}`}>
+                      {client.avatar}
+                    </div>
+                    <span className="text-sm font-bold text-slate-800">{client.name}</span>
+                  </div>
+                  <span className="text-xs font-bold text-amber-700">{percentage.toFixed(1)}% supervised</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <ClinicalProgress clients={clients} servicePlans={servicePlans} />
       </div>

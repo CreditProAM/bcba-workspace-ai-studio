@@ -1,40 +1,27 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, UserPlus, Activity, UserRound, Save, Trash2, Camera, Upload, Cake, Users, Clock } from 'lucide-react';
+import { X, UserPlus, Activity, UserRound, Save, Trash2, Camera, Upload } from 'lucide-react';
 import { Client } from '../types';
 
 interface ClientModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (data: {
-    id?: string;
-    name: string;
-    diagnosis: string;
-    status: Client['status'];
-    imageUrl?: string;
-    age?: number;
-    guardian?: { name: string; contact: string };
-    authorizedHours?: number;
-  }) => void;
+  onSave: (data: { id?: string; name: string; diagnosis: string; status: Client['status']; imageUrl?: string }) => void;
   onDelete?: (id: string) => void;
   initialClient?: Client | null;
 }
 
-export const ClientModal: React.FC<ClientModalProps> = ({
-  isOpen,
-  onClose,
-  onSave,
+export const ClientModal: React.FC<ClientModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  onSave, 
   onDelete,
-  initialClient
+  initialClient 
 }) => {
   const [name, setName] = useState('');
   const [diagnosis, setDiagnosis] = useState('');
   const [status, setStatus] = useState<Client['status']>('Onboarding');
   const [imageUrl, setImageUrl] = useState('');
-  const [age, setAge] = useState('');
-  const [guardianName, setGuardianName] = useState('');
-  const [guardianContact, setGuardianContact] = useState('');
-  const [authorizedHours, setAuthorizedHours] = useState('');
 
   useEffect(() => {
     if (isOpen) {
@@ -43,19 +30,11 @@ export const ClientModal: React.FC<ClientModalProps> = ({
         setDiagnosis(initialClient.diagnosis || '');
         setStatus(initialClient.status);
         setImageUrl(initialClient.imageUrl || '');
-        setAge(initialClient.age !== undefined ? String(initialClient.age) : '');
-        setGuardianName(initialClient.guardian?.name || '');
-        setGuardianContact(initialClient.guardian?.contact || '');
-        setAuthorizedHours(initialClient.authorizedHours !== undefined ? String(initialClient.authorizedHours) : '');
       } else {
         setName('');
         setDiagnosis('');
         setStatus('Onboarding');
         setImageUrl('');
-        setAge('');
-        setGuardianName('');
-        setGuardianContact('');
-        setAuthorizedHours('');
       }
     }
   }, [isOpen, initialClient]);
@@ -74,30 +53,15 @@ export const ClientModal: React.FC<ClientModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-
-    const trimmedGuardianName = guardianName.trim();
-    const trimmedGuardianContact = guardianContact.trim();
-    // Only persist a guardian object if the clinician entered at least one of
-    // the two fields; clearing both on an edit removes the guardian entirely
-    // rather than leaving a stale {name:'', contact:''} object behind.
-    const guardian = (trimmedGuardianName || trimmedGuardianContact)
-      ? { name: trimmedGuardianName, contact: trimmedGuardianContact }
-      : undefined;
-
-    const parsedAge = age.trim() !== '' ? Number(age) : undefined;
-    const parsedAuthorizedHours = authorizedHours.trim() !== '' ? Number(authorizedHours) : undefined;
-
-    onSave({
+    
+    onSave({ 
       id: initialClient?.id,
-      name,
-      diagnosis,
+      name, 
+      diagnosis, 
       status,
-      imageUrl,
-      age: parsedAge !== undefined && !isNaN(parsedAge) ? parsedAge : undefined,
-      guardian,
-      authorizedHours: parsedAuthorizedHours !== undefined && !isNaN(parsedAuthorizedHours) ? parsedAuthorizedHours : undefined,
+      imageUrl
     });
-
+    
     onClose();
   };
 
@@ -184,64 +148,6 @@ export const ClientModal: React.FC<ClientModalProps> = ({
                 onChange={(e) => setDiagnosis(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-800 font-medium"
                 placeholder="e.g. ASD Level 2"
-              />
-            </div>
-          </div>
-
-          {/* Age Input */}
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Age</label>
-            <div className="relative">
-              <Cake size={18} strokeWidth={1.5} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={age}
-                onChange={(e) => setAge(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-800 font-medium"
-                placeholder="e.g. 7"
-              />
-            </div>
-          </div>
-
-          {/* Guardian / Caregiver Input */}
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Guardian / Caregiver</label>
-            <div className="space-y-2">
-              <div className="relative">
-                <Users size={18} strokeWidth={1.5} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  value={guardianName}
-                  onChange={(e) => setGuardianName(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-800 font-medium"
-                  placeholder="Guardian name"
-                />
-              </div>
-              <input
-                type="text"
-                value={guardianContact}
-                onChange={(e) => setGuardianContact(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-800 font-medium"
-                placeholder="Phone or email"
-              />
-            </div>
-          </div>
-
-          {/* Authorized Hours Input */}
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Authorized Hours (weekly)</label>
-            <div className="relative">
-              <Clock size={18} strokeWidth={1.5} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="number"
-                min={0}
-                step={0.5}
-                value={authorizedHours}
-                onChange={(e) => setAuthorizedHours(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-800 font-medium"
-                placeholder="e.g. 15"
               />
             </div>
           </div>

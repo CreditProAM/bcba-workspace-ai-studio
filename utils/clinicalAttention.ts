@@ -1,4 +1,4 @@
-import { AppState, Client, SessionNote, ServicePlan } from '../types';
+import { AppState, CalendarEvent, Client, SessionNote, ServicePlan } from '../types';
 
 export type AttentionPriority = 'high' | 'medium' | 'low';
 
@@ -6,7 +6,8 @@ export type AttentionItemType =
   | 'pending_note'
   | 'service_plan_review'
   | 'program_no_data'
-  | 'program_stale_data';
+  | 'program_stale_data'
+  | 'supervision_below_target';
 
 export interface AttentionItem {
   id: string;
@@ -25,6 +26,7 @@ export interface AttentionItem {
   programName?: string;
   lastDataDate?: string;
   timestamp?: string;
+  supervisionPercentage?: number;
 }
 
 export interface ClinicalAttentionResult {
@@ -35,18 +37,60 @@ export interface ClinicalAttentionResult {
   pendingNotesCount: number;
   servicePlanReviewsCount: number;
   staleOrNoDataCount: number;
+  supervisionBelowTargetCount: number;
+}
+
+// The BACB 5% supervision-ratio target used everywhere else this ratio is
+// already surfaced (ClientProfilePanel's supervision ring, SupervisionView's
+// compliance table, DataOverview's caseload-wide count).
+const SUPERVISION_TARGET_PCT = 5;
+
+/**
+ * Same supervision-ratio math already used in ClientProfilePanel.tsx and
+ * DataOverview.tsx (supervision hours / direct-1:1 therapy hours, as a
+ * percentage). Extracted here rather than reimplemented so this module has
+ * exactly one copy of the calculation to reuse, matching how
+ * utils/clinicalProgress.ts consolidated the equivalent duplication for
+ * progress data.
+ */
+function calculateSupervisionCompliance(clientId: string, events: CalendarEvent[]): {
+  therapyHours: number;
+  supervisionHours: number;
+  compliancePct: number;
+} {
+  const clientEvents = events.filter(e => e.clientId === clientId);
+  const therapyHours = clientEvents
+    .filter(e => e.serviceType === 'Direct 1:1')
+    .reduce((acc, e) => acc + (e.end.getTime() - e.start.getTime()) / (1000 * 60 * 60), 0);
+  const supervisionHours = clientEvents
+    .filter(e => e.serviceType === 'RBT Supervision')
+    .reduce((acc, e) => acc + (e.end.getTime() - e.start.getTime()) / (1000 * 60 * 60), 0);
+  const compliancePct = therapyHours > 0 ? (supervisionHours / therapyHours) * 100 : 0;
+  return { therapyHours, supervisionHours, compliancePct };
 }
 
 export function deriveClinicalAttention(appState: AppState, now: Date = new Date()): ClinicalAttentionResult {
   const items: AttentionItem[] = [];
   const clients = appState.clients || [];
   const servicePlans = appState.servicePlans || [];
+  const events = appState.events || [];
 
   for (const client of clients) {
     // 1. Pending Session Notes requiring BCBA review
     const sessionNotes = client.sessionNotes || [];
     for (const note of sessionNotes) {
       if (note.status === 'Pending Review') {
+        // NOTE ON TIMESTAMP FALLBACK: SessionNote has no dedicated
+        // "submitted for review at" timestamp in the data model -- only a
+        // date-only `date` field (the clinical session date). There is no
+        // honest way to know exactly when a note entered the review queue,
+        // so `note.date` is used here as the best available proxy. This is
+        // an approximation, not the real queue-entry time: a note dated
+        // today could have been submitted seconds ago or hours ago, and the
+        // date-only granularity means "hoursElapsed" is really closer to
+        // "calendar days since the session" than a precise duration. If a
+        // real review-submission timestamp is ever added to SessionNote,
+        // this should switch to that field instead.
         let noteTime: number;
         if (note.date) {
           const parsed = new Date(note.date);
@@ -176,6 +220,28 @@ export function deriveClinicalAttention(appState: AppState, now: Date = new Date
         }
       }
     }
+
+    // 4. Supervision below the established 5% BACB target -- informational,
+    // not a compliance/legal determination. Reuses the exact ratio math
+    // already shown to the user in ClientProfilePanel and DataOverview,
+    // scoped to Active clients only to match the existing caseload-wide
+    // "below target" list on the Data tab.
+    if (client.status === 'Active') {
+      const { therapyHours, supervisionHours, compliancePct } = calculateSupervisionCompliance(client.id, events);
+      if (compliancePct < SUPERVISION_TARGET_PCT) {
+        items.push({
+          id: `att_supervision_${client.id}`,
+          type: 'supervision_below_target',
+          priority: 'medium',
+          title: 'Supervision Below Target',
+          subtitle: `${client.name} • ${compliancePct.toFixed(1)}% of ${SUPERVISION_TARGET_PCT}% target (${supervisionHours.toFixed(1)} of ${therapyHours.toFixed(1)} therapy hrs)`,
+          clientId: client.id,
+          clientName: client.name,
+          client,
+          supervisionPercentage: compliancePct,
+        });
+      }
+    }
   }
 
   const priorityOrder: Record<AttentionPriority, number> = { high: 0, medium: 1, low: 2 };
@@ -187,6 +253,7 @@ export function deriveClinicalAttention(appState: AppState, now: Date = new Date
   const pendingNotesCount = items.filter(i => i.type === 'pending_note').length;
   const servicePlanReviewsCount = items.filter(i => i.type === 'service_plan_review').length;
   const staleOrNoDataCount = items.filter(i => i.type === 'program_no_data' || i.type === 'program_stale_data').length;
+  const supervisionBelowTargetCount = items.filter(i => i.type === 'supervision_below_target').length;
 
   return {
     items,
@@ -196,5 +263,6 @@ export function deriveClinicalAttention(appState: AppState, now: Date = new Date
     pendingNotesCount,
     servicePlanReviewsCount,
     staleOrNoDataCount,
+    supervisionBelowTargetCount,
   };
 }

@@ -12,7 +12,7 @@ import { SidekickModal } from './components/SidekickModal';
 import { EventModal } from './components/EventModal';
 import { ClientModal } from './components/ClientModal';
 import { SettingsModal } from './components/SettingsModal';
-import { ClientProfilePanel } from './components/ClientProfilePanel';
+import { ClientProfilePanel, WorkspaceTab } from './components/ClientProfilePanel';
 import { ServicePlanManagerModal } from './components/servicePlan/ServicePlanManagerModal';
 import { CommandPalette } from './components/CommandPalette';
 import { ContextMenu, ContextMenuCoords, ContextMenuType } from './components/ContextMenu';
@@ -286,6 +286,15 @@ function App() {
   const [logHoursClient, setLogHoursClient] = useState<Client | null>(null);
 
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  // Which tab the Client Workspace should open on. Reset to 'overview' by
+  // plain client-open call sites (Caseload, Header, Command Palette) and
+  // set explicitly when the Needs My Attention panel opens a client
+  // straight into their Service Plan or Data & Progress tab.
+  const [workspaceInitialTab, setWorkspaceInitialTab] = useState<WorkspaceTab>('overview');
+  const openClientWorkspace = (client: Client, tab: WorkspaceTab = 'overview') => {
+    setWorkspaceInitialTab(tab);
+    setSelectedClient(client);
+  };
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
 
@@ -519,7 +528,16 @@ function App() {
     setSelectedClient(null);
   };
 
-  const handleSaveClient = (data: { id?: string; name: string; diagnosis: string; status: Client['status']; imageUrl?: string }) => {
+  const handleSaveClient = (data: {
+    id?: string;
+    name: string;
+    diagnosis: string;
+    status: Client['status'];
+    imageUrl?: string;
+    age?: number;
+    guardian?: { name: string; contact: string };
+    authorizedHours?: number;
+  }) => {
     if (data.id) {
         const existing = clients.find(c => c.id === data.id);
         if (!existing) return;
@@ -529,7 +547,10 @@ function App() {
             diagnosis: data.diagnosis,
             status: data.status,
             imageUrl: data.imageUrl, // Persist image
-            avatar: data.name.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase()
+            avatar: data.name.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase(),
+            age: data.age,
+            guardian: data.guardian,
+            authorizedHours: data.authorizedHours !== undefined ? data.authorizedHours : existing.authorizedHours
         };
         setAppState({
             ...appState,
@@ -559,7 +580,9 @@ function App() {
             diagnosis: data.diagnosis,
             status: data.status,
             imageUrl: data.imageUrl, // Persist image
-            authorizedHours: 15
+            age: data.age,
+            guardian: data.guardian,
+            authorizedHours: data.authorizedHours !== undefined ? data.authorizedHours : 15
         };
         setAppState({
             ...appState,
@@ -748,7 +771,7 @@ function App() {
           <CaseloadView
             clients={clients}
             onAddClient={handleAddClientClick}
-            onClientClick={setSelectedClient}
+            onClientClick={(client) => openClientWorkspace(client)}
           />
         );
       case 'notes': {
@@ -759,7 +782,9 @@ function App() {
             <NotesHome
               clients={clients}
               events={events}
+              appState={appState}
               onSelectClient={(client) => setNotesView({ clientId: client.id, screen: 'list' })}
+              onOpenNote={(client, noteId) => setNotesView({ clientId: client.id, screen: 'note', noteId })}
             />
           );
         }
@@ -781,10 +806,17 @@ function App() {
         }
 
         if (notesView.screen === 'doc' && notesView.doc) {
+          const docId = notesView.doc.docId;
+          const docToEdit = docId
+            ? (notesView.doc.docType === 'FBA'
+                ? notesClient.assessments?.find(a => a.id === docId) || null
+                : notesClient.parentTrainingLogs?.find(l => l.id === docId) || null)
+            : null;
           return (
             <DocumentEditor
               client={notesClient}
               context={notesView.doc}
+              docToEdit={docToEdit}
               onSaveAssessment={upsertAssessment}
               onSaveParentTraining={upsertParentTrainingLog}
               onCancel={() => setNotesView({ clientId: notesClient.id, screen: 'list' })}
@@ -828,9 +860,10 @@ function App() {
                 setActiveTab('notes');
                 setNotesView({ clientId: client.id, screen: 'note', noteId });
               }}
-              onOpenClientWorkspace={(client) => {
-                setSelectedClient(client);
+              onOpenClientWorkspace={(client, tab) => {
+                openClientWorkspace(client, tab || 'overview');
               }}
+              onViewSupervision={() => setActiveTab('supervision')}
             />
             <div className="flex-1 min-h-[500px]">
               {view === 'month' ? (
@@ -887,7 +920,7 @@ function App() {
               clients={clients}
               activeClients={activeClients}
               toggleClient={toggleClient}
-              onClientClick={setSelectedClient}
+              onClientClick={(client) => openClientWorkspace(client)}
               onSidekickClick={() => setIsSidekickOpen(true)}
               currentDate={currentDate}
               onNavigate={handleNavigate}
@@ -982,9 +1015,11 @@ function App() {
       />
 
       <ClientProfilePanel
+        key={selectedClient ? `${selectedClient.id}-${workspaceInitialTab}` : 'none'}
         client={selectedClient}
         events={events}
         servicePlans={appState.servicePlans || []}
+        initialTab={workspaceInitialTab}
         onClose={() => setSelectedClient(null)}
         onEdit={() => selectedClient && handleEditClientClick(selectedClient)}
         onLogHours={handleSaveEvent}
@@ -1012,7 +1047,7 @@ function App() {
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
         clients={clients}
-        onClientSelect={setSelectedClient}
+        onClientSelect={(client) => openClientWorkspace(client)}
         onViewChange={setView}
         onNavigate={handleNavigate}
         onAddEvent={() => handleAddClick()}

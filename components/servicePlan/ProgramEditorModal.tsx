@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Save, BookmarkPlus, Copy, Plus, Trash2 } from 'lucide-react';
 import { ClinicalProgram, ProgramType, MeasurementType, ProgramStatus } from '../../types';
+import { formatProgramValue } from '../../utils/clinicalProgress';
 
 interface ProgramEditorModalProps {
   isOpen: boolean;
@@ -29,9 +30,15 @@ const MEASUREMENT_TYPES: { value: MeasurementType; label: string }[] = [
 export const ProgramEditorModal: React.FC<ProgramEditorModalProps> = ({
   isOpen, onClose, program, programLibrary, onSave, onSaveToLibrary
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'measurement' | 'objectives' | 'clinical'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'measurement' | 'baseline' | 'objectives' | 'clinical'>('general');
   const [formData, setFormData] = useState<ClinicalProgram>(() => {
-    if (program) return JSON.parse(JSON.stringify(program));
+    if (program) {
+      const cloned: ClinicalProgram = JSON.parse(JSON.stringify(program));
+      // Defensive default: programs saved before the baseline field existed
+      // (or otherwise missing it in older localStorage state) must still
+      // load cleanly rather than throwing on formData.baseline.map/.length.
+      return { ...cloned, baseline: cloned.baseline || [] };
+    }
     return {
       id: crypto.randomUUID(),
       name: '',
@@ -65,6 +72,115 @@ export const ProgramEditorModal: React.FC<ProgramEditorModalProps> = ({
       status: 'active'
     });
     setShowLibrary(false);
+  };
+
+  // Baseline capture -- reuses the program's already-configured measurement
+  // type rather than introducing a second measurement system. Storage stays
+  // on the existing `baseline: { date, value }[]` field; `value` always holds
+  // the already-normalized measurement value as a string (a plain count,
+  // minutes, 0-100 percentage, intensity level, or 0-100 task-analysis
+  // percent-independent), matching the same normalized shape
+  // normalizeProgramValue()/formatProgramValue() use for session data.
+  const addBaselinePoint = () => {
+    const newPoint = { date: new Date().toISOString().split('T')[0], value: '' };
+    setFormData({ ...formData, baseline: [...formData.baseline, newPoint] });
+  };
+
+  const updateBaselinePoint = (idx: number, field: 'date' | 'value', value: string) => {
+    const newBaseline = [...formData.baseline];
+    newBaseline[idx] = { ...newBaseline[idx], [field]: value };
+    setFormData({ ...formData, baseline: newBaseline });
+  };
+
+  const removeBaselinePoint = (idx: number) => {
+    const newBaseline = [...formData.baseline];
+    newBaseline.splice(idx, 1);
+    setFormData({ ...formData, baseline: newBaseline });
+  };
+
+  // Same fallback used by live session data collection (DataCollection.tsx):
+  // if no intensity levels are configured on the program, default to a
+  // simple 1-3 scale rather than inventing a separate baseline-only scale.
+  const intensityOptions = formData.measurement.intensityLevels && formData.measurement.intensityLevels.length > 0
+    ? formData.measurement.intensityLevels
+    : [1, 2, 3].map(level => ({ level, description: undefined as string | undefined }));
+
+  const renderBaselineValueInput = (point: { date: string; value: string }, idx: number) => {
+    const numericInputCls = "w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm";
+    switch (formData.measurement.type) {
+      case 'frequency':
+        return (
+          <>
+            <label className="text-[10px] uppercase font-bold text-slate-400">Count</label>
+            <input
+              type="number" min={0} step={1}
+              value={point.value}
+              onChange={e => updateBaselinePoint(idx, 'value', e.target.value)}
+              className={numericInputCls}
+              placeholder="e.g. 4"
+            />
+          </>
+        );
+      case 'duration':
+        return (
+          <>
+            <label className="text-[10px] uppercase font-bold text-slate-400">Minutes</label>
+            <input
+              type="number" min={0} step={1}
+              value={point.value}
+              onChange={e => updateBaselinePoint(idx, 'value', e.target.value)}
+              className={numericInputCls}
+              placeholder="e.g. 12"
+            />
+          </>
+        );
+      case 'percentage':
+        return (
+          <>
+            <label className="text-[10px] uppercase font-bold text-slate-400">% Correct (0-100)</label>
+            <input
+              type="number" min={0} max={100} step={1}
+              value={point.value}
+              onChange={e => updateBaselinePoint(idx, 'value', e.target.value)}
+              className={numericInputCls}
+              placeholder="e.g. 20"
+            />
+          </>
+        );
+      case 'intensity':
+        return (
+          <>
+            <label className="text-[10px] uppercase font-bold text-slate-400">Intensity Level</label>
+            <select
+              value={point.value}
+              onChange={e => updateBaselinePoint(idx, 'value', e.target.value)}
+              className={`${numericInputCls} bg-white`}
+            >
+              <option value="">-- Select level --</option>
+              {intensityOptions.map(lvl => (
+                <option key={lvl.level} value={String(lvl.level)}>
+                  Level {lvl.level}{lvl.description ? `: ${lvl.description}` : ''}
+                </option>
+              ))}
+            </select>
+          </>
+        );
+      case 'task_analysis':
+        return (
+          <>
+            <label className="text-[10px] uppercase font-bold text-slate-400">% Steps Independent (0-100)</label>
+            <input
+              type="number" min={0} max={100} step={1}
+              value={point.value}
+              onChange={e => updateBaselinePoint(idx, 'value', e.target.value)}
+              className={numericInputCls}
+              placeholder="e.g. 0"
+            />
+          </>
+        );
+      default:
+        return null;
+    }
   };
 
   return (
@@ -114,7 +230,7 @@ export const ProgramEditorModal: React.FC<ProgramEditorModalProps> = ({
           <>
             {/* Tabs */}
             <div className="flex border-b border-slate-200 bg-slate-50 shrink-0">
-              {(['general', 'measurement', 'objectives', 'clinical'] as const).map(t => (
+              {(['general', 'measurement', 'baseline', 'objectives', 'clinical'] as const).map(t => (
                 <button
                   key={t}
                   onClick={() => setActiveTab(t)}
@@ -238,9 +354,101 @@ export const ProgramEditorModal: React.FC<ProgramEditorModalProps> = ({
                   {formData.measurement.type === 'intensity' && (
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                       <h4 className="font-bold text-slate-800 mb-3 text-sm">Intensity Levels</h4>
-                      <p className="text-xs text-slate-500 mb-4">Level 1, 2, 3, etc. with optional descriptions.</p>
-                      {/* simplified for MVP */}
-                      <p className="text-sm font-medium text-slate-700 italic">Levels will default to 1-3 (Mild, Moderate, Severe) during data collection.</p>
+                      <p className="text-xs text-slate-500 mb-4">Define each level number and an optional description (e.g. Mild, Moderate, Severe). If left empty, data collection defaults to levels 1-3.</p>
+                      {(formData.measurement.intensityLevels || []).map((lvl, idx) => (
+                        <div key={idx} className="flex items-center gap-2 mb-2">
+                          <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-xs flex items-center justify-center font-bold shrink-0">{lvl.level}</span>
+                          <input
+                            type="text"
+                            value={lvl.description || ''}
+                            onChange={e => {
+                              const newLevels = [...(formData.measurement.intensityLevels || [])];
+                              newLevels[idx] = { ...newLevels[idx], description: e.target.value };
+                              setFormData({ ...formData, measurement: { ...formData.measurement, intensityLevels: newLevels } });
+                            }}
+                            placeholder="Description (optional)"
+                            className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm"
+                          />
+                          <button
+                            onClick={() => {
+                              const newLevels = [...(formData.measurement.intensityLevels || [])];
+                              newLevels.splice(idx, 1);
+                              setFormData({ ...formData, measurement: { ...formData.measurement, intensityLevels: newLevels } });
+                            }}
+                            className="text-red-400 hover:text-red-600 p-1"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => {
+                          const existing = formData.measurement.intensityLevels || [];
+                          const nextLevel = existing.length > 0 ? Math.max(...existing.map(l => l.level)) + 1 : 1;
+                          const newLevels = [...existing, { level: nextLevel, description: '' }];
+                          setFormData({ ...formData, measurement: { ...formData.measurement, intensityLevels: newLevels } });
+                        }}
+                        className="mt-2 text-sm font-bold text-indigo-600 flex items-center gap-1 hover:text-indigo-700"
+                      >
+                        <Plus size={16} /> Add Level
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'baseline' && (
+                <div className="space-y-4 animate-fade-in">
+                  <div className="flex justify-between items-start gap-4">
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-sm">Baseline Data</h3>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Pre-treatment reference points, captured with this program's configured{' '}
+                        {MEASUREMENT_TYPES.find(mt => mt.value === formData.measurement.type)?.label.toLowerCase()} measurement.
+                        Baseline is clinical reference context only -- it is never treated as a treatment session datapoint.
+                      </p>
+                    </div>
+                    <button
+                      onClick={addBaselinePoint}
+                      className="text-indigo-600 hover:text-indigo-700 text-sm font-bold flex items-center gap-1 shrink-0"
+                    >
+                      <Plus size={16} /> Add Point
+                    </button>
+                  </div>
+
+                  {formData.baseline.length === 0 ? (
+                    <div className="text-center p-6 text-slate-400 italic bg-slate-50 rounded-xl border border-slate-100">
+                      No baseline data captured yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {formData.baseline.map((point, idx) => (
+                        <div key={idx} className="flex items-end gap-3 bg-white p-3 border border-slate-200 rounded-lg shadow-sm">
+                          <div className="w-36 shrink-0">
+                            <label className="text-[10px] uppercase font-bold text-slate-400">Date</label>
+                            <input
+                              type="date"
+                              value={point.date}
+                              onChange={e => updateBaselinePoint(idx, 'date', e.target.value)}
+                              className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            {renderBaselineValueInput(point, idx)}
+                          </div>
+                          {point.value !== '' && !isNaN(Number(point.value)) && (
+                            <div className="text-xs font-bold text-indigo-600 pb-2 whitespace-nowrap">
+                              {formatProgramValue(Number(point.value), formData.measurement.type)}
+                            </div>
+                          )}
+                          <button
+                            onClick={() => removeBaselinePoint(idx)}
+                            className="text-red-400 hover:text-red-600 p-1.5"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>

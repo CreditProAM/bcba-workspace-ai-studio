@@ -4,22 +4,25 @@ import { Client, CalendarEvent, ServicePlan } from '../types';
 import { generateClientSummary, ClientSummary } from '../services/geminiService';
 import { ClinicalProgress } from './data/ClinicalProgress';
 import { deriveClinicalAttention } from '../utils/clinicalAttention';
+import { DocContext } from './notes/DocumentEditor';
+import { getLatestProgramData, formatProgramValue, normalizeProgramValue } from '../utils/clinicalProgress';
+
+export type WorkspaceTab = 'overview' | 'servicePlan' | 'data' | 'notes' | 'documents';
 
 interface ClientProfilePanelProps {
   client: Client | null;
   events: CalendarEvent[];
   servicePlans?: ServicePlan[];
+  initialTab?: WorkspaceTab;
   onClose: () => void;
   onEdit: () => void;
   onLogHours?: (event: CalendarEvent) => void;
   onOpenServicePlan?: () => void;
-  onNavigateToNotes?: (view: { clientId: string, screen: 'list' | 'note' | 'doc', noteId?: string, doc?: any }) => void;
+  onNavigateToNotes?: (view: { clientId: string, screen: 'list' | 'note' | 'doc', noteId?: string, doc?: DocContext }) => void;
 }
 
-type WorkspaceTab = 'overview' | 'servicePlan' | 'data' | 'notes' | 'documents';
-
-export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, events, servicePlans = [], onClose, onEdit, onOpenServicePlan, onNavigateToNotes }) => {
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>('overview');
+export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, events, servicePlans = [], initialTab, onClose, onEdit, onOpenServicePlan, onNavigateToNotes }) => {
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>(initialTab || 'overview');
   const [summary, setSummary] = useState<ClientSummary | null>(null);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
 
@@ -87,6 +90,7 @@ export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, 
                    {item.type === 'pending_note' && <Clock size={16} className="text-amber-500" />}
                    {item.type === 'service_plan_review' && <Calendar size={16} className="text-amber-500" />}
                    {(item.type === 'program_no_data' || item.type === 'program_stale_data') && <Activity size={16} className="text-amber-500" />}
+                   {item.type === 'supervision_below_target' && <ShieldCheck size={16} className="text-amber-500" />}
                    <div>
                      <p className="text-sm font-bold text-slate-800">{item.title}</p>
                      <p className="text-[10px] text-slate-500">{item.subtitle}</p>
@@ -159,23 +163,8 @@ export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, 
                {(() => {
                  const activePrograms = activePlan.categories.flatMap(c => c.programs).filter(p => p.status === 'active');
                  const programsWithData = activePrograms.map(program => {
-                    const notes = [...(client.sessionNotes || [])].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-                    let latestVal: any = null;
-                    for (let i = notes.length - 1; i >= 0; i--) {
-                       const pd = notes[i].programData?.find(p => p.programId === program.id);
-                       if (pd) {
-                          if (pd.measurementType === 'percentage') {
-                             latestVal = (pd.value?.total > 0 ? Math.round((pd.value.correct / pd.value.total) * 100) : 0) + '%';
-                          } else if (pd.measurementType === 'task_analysis') {
-                             const steps = Object.values(pd.value || {});
-                             const ind = steps.filter(s => s === 'independent').length;
-                             latestVal = (steps.length > 0 ? Math.round((ind / steps.length) * 100) : 0) + '%';
-                          } else {
-                             latestVal = pd.value;
-                          }
-                          break;
-                       }
-                    }
+                    const latest = getLatestProgramData(client.sessionNotes || [], program.id);
+                    const latestVal = latest ? formatProgramValue(normalizeProgramValue(latest), latest.measurementType) : null;
                     return { program, latestVal };
                  }).filter(p => p.latestVal !== null).slice(0, 3);
 
@@ -381,14 +370,14 @@ export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, 
          <h3 className="text-lg font-bold text-slate-900">Clinical Documents</h3>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-         <button onClick={() => onNavigateToNotes?.({ clientId: client.id, screen: 'doc', doc: { type: 'FBA', clientName: client.name, date: new Date().toISOString().split('T')[0] } })} className="flex items-center gap-3 p-5 bg-white rounded-2xl border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all text-left">
+         <button onClick={() => onNavigateToNotes?.({ clientId: client.id, screen: 'doc', doc: { docType: 'FBA' } })} className="flex items-center gap-3 p-5 bg-white rounded-2xl border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all text-left">
            <div className="bg-indigo-50 p-3 rounded-xl text-indigo-600"><ClipboardList size={20} /></div>
            <div>
              <div className="text-sm font-bold text-slate-900">Functional Behavior Assessment</div>
              <div className="text-[10px] text-slate-500 mt-0.5">Start new FBA draft</div>
            </div>
          </button>
-         <button onClick={() => onNavigateToNotes?.({ clientId: client.id, screen: 'doc', doc: { type: 'Parent Training', clientName: client.name, date: new Date().toISOString().split('T')[0] } })} className="flex items-center gap-3 p-5 bg-white rounded-2xl border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all text-left">
+         <button onClick={() => onNavigateToNotes?.({ clientId: client.id, screen: 'doc', doc: { docType: 'ParentTraining' } })} className="flex items-center gap-3 p-5 bg-white rounded-2xl border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all text-left">
            <div className="bg-indigo-50 p-3 rounded-xl text-indigo-600"><Users size={20} /></div>
            <div>
              <div className="text-sm font-bold text-slate-900">Parent Training Log</div>
@@ -404,16 +393,16 @@ export const ClientProfilePanel: React.FC<ClientProfilePanelProps> = ({ client, 
          ) : (
             <div className="divide-y divide-slate-100">
                {client.assessments?.map(doc => (
-                 <button key={doc.id} onClick={() => onNavigateToNotes?.({ clientId: client.id, screen: 'doc', doc: { type: 'FBA', id: doc.id, clientName: client.name, date: doc.date } })} className="w-full flex items-center justify-between p-4 hover:bg-slate-50 text-left">
+                 <button key={doc.id} onClick={() => onNavigateToNotes?.({ clientId: client.id, screen: 'doc', doc: { docType: 'FBA', docId: doc.id } })} className="w-full flex items-center justify-between p-4 hover:bg-slate-50 text-left">
                     <div>
                       <div className="text-sm font-bold text-slate-800">FBA • {doc.date}</div>
-                      <div className="text-xs text-slate-500">{doc.status}</div>
+                      <div className="text-xs text-slate-500 truncate max-w-xs">{doc.targetBehavior || 'No target behavior recorded'}</div>
                     </div>
                     <ChevronRight size={16} className="text-slate-300" />
                  </button>
                ))}
                {client.parentTrainingLogs?.map(doc => (
-                 <button key={doc.id} onClick={() => onNavigateToNotes?.({ clientId: client.id, screen: 'doc', doc: { type: 'Parent Training', id: doc.id, clientName: client.name, date: doc.date } })} className="w-full flex items-center justify-between p-4 hover:bg-slate-50 text-left">
+                 <button key={doc.id} onClick={() => onNavigateToNotes?.({ clientId: client.id, screen: 'doc', doc: { docType: 'ParentTraining', docId: doc.id } })} className="w-full flex items-center justify-between p-4 hover:bg-slate-50 text-left">
                     <div>
                       <div className="text-sm font-bold text-slate-800">Parent Training • {doc.date}</div>
                       <div className="text-xs text-slate-500">{doc.attendees.join(', ')}</div>

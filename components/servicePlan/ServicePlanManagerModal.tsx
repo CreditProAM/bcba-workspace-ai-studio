@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { X, Plus, Save, FileText, Settings, Archive, AlertCircle, ChevronDown, ChevronRight, Edit2, Play, Pause, CheckCircle } from 'lucide-react';
-import { Client, ServicePlan, ClinicalProgram, ProgramCategory } from '../../types';
+import { X, Plus, FileText, Archive, ChevronRight, Play, Pause, CheckCircle } from 'lucide-react';
+import { Client, ServicePlan, ClinicalProgram } from '../../types';
 import { ProgramEditorModal } from './ProgramEditorModal';
 
 interface ServicePlanManagerModalProps {

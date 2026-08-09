@@ -33,6 +33,8 @@ Never assume an AI Studio workspace, a Cursor session, or any other environment 
 
 Do not let multiple agents independently implement the same slice. If two agents could plausibly pick up the same task, confirm ownership before starting.
 
+**Rule:** Google AI Studio/Gemini must not push directly to GitHub `main`. Gemini work is experimental/prototyping unless explicitly authorized. Production changes are integrated through the primary local development clone by Claude, Cursor, or Codex.
+
 ## 4. Current Product Thesis
 
 BCBA Workspace is a BCBA operations + clinical workspace for managing a caseload — it is **not** a billing platform.
@@ -45,7 +47,7 @@ Client → Service Plan → Program → Baseline → Measurement → Session Dat
 
 ## 5. Current Built Capabilities
 
-Verified as of commit `c0dfd8ce0f833c803ec0db7c74dbc0696b905f7c`:
+Verified as of commit `d0c2ad018be05f0d3f143136223d12c40d0dd64e`:
 
 - Today / Calendar
 - Caseload
@@ -68,6 +70,7 @@ Verified as of commit `c0dfd8ce0f833c803ec0db7c74dbc0696b905f7c`:
 - Parent Training
 - Cross-Caseload Pending Review Queue
 - Baseline Capture + chart reference (Program Editor "Baseline" tab, `ClinicalProgress` reference line)
+- Objective Mastery Criteria V1 (optional target value; `at_least`/`at_most` comparison direction; consecutive-session requirement; deterministic streak calculation through the shared `clinicalProgress` logic; criterion-achieved indication surfaced in Clinical Progress; BCBA remains solely responsible for manual mastery -- criteria never auto-mutate objective status)
 - Toolkit
 - Sidekick
 - JSON export/import backup
@@ -76,11 +79,10 @@ Verified as of commit `c0dfd8ce0f833c803ec0db7c74dbc0696b905f7c`:
 
 In order:
 
-1. Objective Mastery Criteria
-2. Deepen clinical program/progress workflows based on actual use
-3. Documents/templates only when justified
-4. Assessments only when a specific instrument/use case is validated
-5. Production infrastructure only when preparing for real pilot/deployment
+1. Deepen clinical program/progress workflows based on actual use
+2. Documents/templates only when justified
+3. Assessments only when a specific instrument/use case is validated
+4. Production infrastructure only when preparing for real pilot/deployment
 
 Priorities may change after real BCBA usage. Treat this list as a starting order, not a fixed contract.
 
@@ -159,6 +161,12 @@ Do not automatically start the next slice.
 
 ## 12. Current Next Recommended Slice
 
-**Objective Mastery Criteria V1**
+**NEXT PHASE: Clinical Workflow Validation / Pilot Simulation**
 
-This should only be started after this direction file (and the agent grounding files that accompany it) are committed and pushed as their own bounded slice — not bundled into the same commit as a feature change.
+Before adding another major module, validate the complete current loop end-to-end:
+
+```
+Client → Service Plan → Program → Baseline → Objective + Mastery Criterion → Measurement → Session Data → Session Note → Progress → Criterion Review → BCBA Manual Mastery → Needs Attention
+```
+
+This is not a new feature slice. It is a validation pass on what has already been built -- exercising the loop against real or realistic BCBA usage to surface friction, gaps, and priority corrections before committing to the next roadmap item in Section 6.

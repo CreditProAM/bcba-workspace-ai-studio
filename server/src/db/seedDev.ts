@@ -132,17 +132,32 @@ async function grantFunctions(
   }
 }
 
-async function ensureCredentialDef(orgId: string, code: string, name: string) {
+async function ensureCredentialDef(
+  orgId: string,
+  code: string,
+  name: string,
+  clinicalAuthority: 'NONE' | 'RBT' | 'BCABA' | 'BCBA',
+) {
   const db = getDb();
   const rows = await db
     .select()
     .from(credentialDefinitions)
     .where(eq(credentialDefinitions.organizationId, orgId));
   const found = rows.find((r) => r.code === code);
-  if (found) return found;
+  if (found) {
+    if (found.clinicalAuthority !== clinicalAuthority) {
+      const [updated] = await db
+        .update(credentialDefinitions)
+        .set({ clinicalAuthority, name, updatedAt: new Date() })
+        .where(eq(credentialDefinitions.id, found.id))
+        .returning();
+      return updated;
+    }
+    return found;
+  }
   const [created] = await db
     .insert(credentialDefinitions)
-    .values({ organizationId: orgId, code, name })
+    .values({ organizationId: orgId, code, name, clinicalAuthority })
     .returning();
   return created;
 }
@@ -175,12 +190,23 @@ export async function seedDevPersonas() {
   await grantFunctions(org.id, rbtMem.id, ['clinical_delivery'], 'ASSIGNED_CLIENTS');
   await grantFunctions(org.id, bcabaMem.id, ['clinical_delivery'], 'ASSIGNED_CLIENTS');
 
-  const bcbaDef = await ensureCredentialDef(org.id, 'BCBA', 'Board Certified Behavior Analyst');
-  const rbtDef = await ensureCredentialDef(org.id, 'RBT', 'Registered Behavior Technician');
+  const bcbaDef = await ensureCredentialDef(
+    org.id,
+    'BCBA',
+    'Board Certified Behavior Analyst',
+    'BCBA',
+  );
+  const rbtDef = await ensureCredentialDef(
+    org.id,
+    'RBT',
+    'Registered Behavior Technician',
+    'RBT',
+  );
   const bcabaDef = await ensureCredentialDef(
     org.id,
     'BCaBA',
     'Board Certified Assistant Behavior Analyst',
+    'BCABA',
   );
 
   // Reset org credentials for idempotent seed of known personas

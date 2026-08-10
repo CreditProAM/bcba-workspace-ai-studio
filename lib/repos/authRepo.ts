@@ -1,6 +1,6 @@
 import { apiFetch, setCsrfToken } from '../api/client';
 import { isApiDomain } from '../cutover';
-import { User } from '../../types';
+import { ClinicalCeiling, User } from '../../types';
 
 const STORAGE_KEY_USERS = 'bcba_users_v1';
 
@@ -9,8 +9,8 @@ export type AuthMeResponse = {
   organizationId: string;
   membershipId: string;
   employmentType?: string;
-  functions?: { code: string; name: string; scopeMode: string }[];
-  clinicalCeiling?: unknown;
+  functions?: { code: string; name?: string; scopeMode: string }[];
+  clinicalCeiling?: ClinicalCeiling;
 };
 
 type LoginResponse = {
@@ -18,6 +18,8 @@ type LoginResponse = {
   organization: { id: string; name: string };
   membershipId: string;
   csrfToken: string;
+  functions?: { code: string; name?: string; scopeMode: string }[];
+  clinicalCeiling?: ClinicalCeiling;
 };
 
 function initials(name: string): string {
@@ -29,25 +31,34 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
-function inferRole(functions?: { code: string }[]): User['role'] {
-  const codes = functions?.map((f) => f.code) ?? [];
-  if (codes.includes('org_admin')) return 'Admin';
-  if (codes.includes('clinical_supervision')) return 'BCBA';
-  if (codes.includes('clinical_delivery')) return 'RBT';
-  if (codes.includes('hr_credentialing')) return 'Admin';
-  return 'BCBA';
+function roleFromCeiling(ceiling?: ClinicalCeiling): User['role'] {
+  switch (ceiling) {
+    case 'BCBA':
+      return 'BCBA';
+    case 'BCABA':
+      return 'BCaBA';
+    case 'RBT':
+      return 'RBT';
+    case 'NONE':
+      return 'Admin';
+    default:
+      return 'Admin';
+  }
 }
 
 function mapApiUser(
   apiUser: { id: string; email: string; name: string },
-  functions?: { code: string }[],
+  functions?: { code: string; name?: string; scopeMode: string }[],
+  clinicalCeiling?: ClinicalCeiling,
 ): User {
   return {
     id: apiUser.id,
     email: apiUser.email,
     name: apiUser.name,
-    role: inferRole(functions),
+    role: roleFromCeiling(clinicalCeiling),
     avatar: initials(apiUser.name),
+    functions,
+    clinicalCeiling,
   };
 }
 
@@ -71,7 +82,7 @@ export async function login(email: string, password: string): Promise<User> {
     body: { email, password },
   });
   setCsrfToken(res.csrfToken);
-  return mapApiUser(res.user);
+  return mapApiUser(res.user, res.functions, res.clinicalCeiling);
 }
 
 export async function logout(): Promise<void> {
@@ -92,7 +103,7 @@ export async function me(): Promise<User | null> {
   }
   try {
     const res = await apiFetch<AuthMeResponse>('/api/v1/auth/me');
-    return mapApiUser(res.user, res.functions);
+    return mapApiUser(res.user, res.functions, res.clinicalCeiling);
   } catch {
     setCsrfToken(null);
     return null;

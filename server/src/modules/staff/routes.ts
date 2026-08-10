@@ -17,11 +17,11 @@ import {
   requireAuthMiddleware,
 } from '../../middleware/authContext.js';
 import { hashPassword, normalizeEmail } from '../../shared/crypto.js';
-import { assertRowVersionMatch, nextRowVersion } from '../../shared/concurrency.js';
 import { AppError } from '../../shared/errors.js';
+import { updateWithRowVersion } from '../../shared/optimistic.js';
 import { revokeAllSessionsForUser } from '../auth/sessionService.js';
-import { authorize } from '../authz/authorize.js';
-import { Verbs } from '../authz/verbs.js';
+import { authorizeCapability } from '../authz/authorize.js';
+import { Capabilities } from '../authz/capabilities.js';
 import { writeAuditEntry } from '../platform/audit.js';
 
 export const staffRoutes = new Hono();
@@ -30,14 +30,7 @@ staffRoutes.use('*', requireAuthMiddleware);
 
 staffRoutes.get('/staff', async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.VIEW });
-  if (
-    !auth.functionCodes.includes('hr_credentialing') &&
-    !auth.functionCodes.includes('org_admin') &&
-    !auth.functionCodes.includes('payroll')
-  ) {
-    throw new AppError(403, 'FUNCTION_DENIED', 'Staff directory requires HR/admin function.');
-  }
+  await authorizeCapability({ ctx: auth, capability: Capabilities.STAFF_VIEW });
 
   const db = getDb();
   const rows = await db
@@ -61,20 +54,13 @@ staffRoutes.get('/staff', async (c) => {
       hireDate: r.membership.hireDate,
       terminatedAt: r.membership.terminatedAt,
       rowVersion: r.membership.rowVersion,
-      // Never expose passwordHash
     })),
   });
 });
 
 staffRoutes.get('/staff/:membershipId', async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.VIEW });
-  if (
-    !auth.functionCodes.includes('hr_credentialing') &&
-    !auth.functionCodes.includes('org_admin')
-  ) {
-    throw new AppError(403, 'FUNCTION_DENIED', 'Staff detail requires HR/admin function.');
-  }
+  await authorizeCapability({ ctx: auth, capability: Capabilities.STAFF_VIEW });
   const membershipId = c.req.param('membershipId');
   const db = getDb();
   const [row] = await db
@@ -166,13 +152,7 @@ staffRoutes.get('/staff/:membershipId', async (c) => {
 
 staffRoutes.post('/staff', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.OPERATIONAL_CREATE });
-  if (
-    !auth.functionCodes.includes('hr_credentialing') &&
-    !auth.functionCodes.includes('org_admin')
-  ) {
-    throw new AppError(403, 'FUNCTION_DENIED', 'Creating staff requires HR/admin.');
-  }
+  await authorizeCapability({ ctx: auth, capability: Capabilities.STAFF_EDIT });
 
   const body = z
     .object({
@@ -241,13 +221,7 @@ staffRoutes.post('/staff', csrfGuardMiddleware, async (c) => {
 
 staffRoutes.patch('/staff/:membershipId', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.OPERATIONAL_EDIT });
-  if (
-    !auth.functionCodes.includes('hr_credentialing') &&
-    !auth.functionCodes.includes('org_admin')
-  ) {
-    throw new AppError(403, 'FUNCTION_DENIED', 'Editing staff requires HR/admin.');
-  }
+  await authorizeCapability({ ctx: auth, capability: Capabilities.STAFF_EDIT });
 
   const membershipId = c.req.param('membershipId');
   const body = z
@@ -270,23 +244,18 @@ staffRoutes.patch('/staff/:membershipId', csrfGuardMiddleware, async (c) => {
     )
     .limit(1);
   if (!existing) throw new AppError(404, 'NOT_FOUND', 'Staff membership not found.');
-  assertRowVersionMatch(body.rowVersion, existing.rowVersion, 'Membership');
 
-  const [row] = await db
-    .update(organizationMemberships)
-    .set({
+  const row = await updateWithRowVersion(organizationMemberships, {
+    organizationId: auth.organizationId,
+    id: membershipId,
+    expectedVersion: body.rowVersion,
+    notFoundMessage: 'Staff membership not found.',
+    set: {
       employmentType: body.employmentType ?? existing.employmentType,
       jobTitle: body.jobTitle !== undefined ? body.jobTitle : existing.jobTitle,
       updatedAt: new Date(),
-      rowVersion: nextRowVersion(existing.rowVersion),
-    })
-    .where(
-      and(
-        eq(organizationMemberships.organizationId, auth.organizationId),
-        eq(organizationMemberships.id, membershipId),
-      ),
-    )
-    .returning();
+    },
+  });
 
   await writeAuditEntry({
     organizationId: auth.organizationId,
@@ -303,13 +272,7 @@ staffRoutes.patch('/staff/:membershipId', csrfGuardMiddleware, async (c) => {
 
 staffRoutes.post('/staff/:membershipId/lifecycle', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.ARCHIVE_DEACTIVATE });
-  if (
-    !auth.functionCodes.includes('hr_credentialing') &&
-    !auth.functionCodes.includes('org_admin')
-  ) {
-    throw new AppError(403, 'FUNCTION_DENIED', 'Staff lifecycle requires HR/admin.');
-  }
+  await authorizeCapability({ ctx: auth, capability: Capabilities.STAFF_LIFECYCLE });
 
   const membershipId = c.req.param('membershipId');
   const body = z
@@ -332,23 +295,18 @@ staffRoutes.post('/staff/:membershipId/lifecycle', csrfGuardMiddleware, async (c
     )
     .limit(1);
   if (!existing) throw new AppError(404, 'NOT_FOUND', 'Staff membership not found.');
-  assertRowVersionMatch(body.rowVersion, existing.rowVersion, 'Membership');
 
-  const [row] = await db
-    .update(organizationMemberships)
-    .set({
+  const row = await updateWithRowVersion(organizationMemberships, {
+    organizationId: auth.organizationId,
+    id: membershipId,
+    expectedVersion: body.rowVersion,
+    notFoundMessage: 'Staff membership not found.',
+    set: {
       status: body.status,
       terminatedAt: body.status === 'terminated' ? new Date() : existing.terminatedAt,
       updatedAt: new Date(),
-      rowVersion: nextRowVersion(existing.rowVersion),
-    })
-    .where(
-      and(
-        eq(organizationMemberships.organizationId, auth.organizationId),
-        eq(organizationMemberships.id, membershipId),
-      ),
-    )
-    .returning();
+    },
+  });
 
   if (body.status === 'terminated') {
     await revokeAllSessionsForUser(existing.userId, auth.organizationId);
@@ -370,13 +328,7 @@ staffRoutes.post('/staff/:membershipId/lifecycle', csrfGuardMiddleware, async (c
 
 staffRoutes.post('/staff/:membershipId/functions', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.CONFIGURE });
-  if (
-    !auth.functionCodes.includes('hr_credentialing') &&
-    !auth.functionCodes.includes('org_admin')
-  ) {
-    throw new AppError(403, 'FUNCTION_DENIED', 'Granting functions requires HR/admin.');
-  }
+  await authorizeCapability({ ctx: auth, capability: Capabilities.FUNCTIONS_MANAGE });
 
   const membershipId = c.req.param('membershipId');
   const body = z
@@ -430,13 +382,7 @@ staffRoutes.post('/staff/:membershipId/functions', csrfGuardMiddleware, async (c
 
 staffRoutes.post('/staff/:membershipId/functions/:grantId/revoke', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.CONFIGURE });
-  if (
-    !auth.functionCodes.includes('hr_credentialing') &&
-    !auth.functionCodes.includes('org_admin')
-  ) {
-    throw new AppError(403, 'FUNCTION_DENIED', 'Revoking functions requires HR/admin.');
-  }
+  await authorizeCapability({ ctx: auth, capability: Capabilities.FUNCTIONS_MANAGE });
 
   const membershipId = c.req.param('membershipId');
   const grantId = c.req.param('grantId');
@@ -468,13 +414,7 @@ staffRoutes.post('/staff/:membershipId/functions/:grantId/revoke', csrfGuardMidd
 
 staffRoutes.post('/staff/:membershipId/credentials', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.OPERATIONAL_CREATE });
-  if (
-    !auth.functionCodes.includes('hr_credentialing') &&
-    !auth.functionCodes.includes('org_admin')
-  ) {
-    throw new AppError(403, 'FUNCTION_DENIED', 'Credentials require HR/admin.');
-  }
+  await authorizeCapability({ ctx: auth, capability: Capabilities.CREDENTIALS_MANAGE });
 
   const membershipId = c.req.param('membershipId');
   const body = z
@@ -518,6 +458,7 @@ staffRoutes.post('/staff/:membershipId/credentials', csrfGuardMiddleware, async 
         organizationId: auth.organizationId,
         code: body.credentialCode,
         name: body.credentialCode,
+        clinicalAuthority: 'NONE',
       })
       .returning();
   }
@@ -554,13 +495,7 @@ staffRoutes.post('/staff/:membershipId/credentials', csrfGuardMiddleware, async 
 
 staffRoutes.patch('/credentials/:credentialId', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.OPERATIONAL_EDIT });
-  if (
-    !auth.functionCodes.includes('hr_credentialing') &&
-    !auth.functionCodes.includes('org_admin')
-  ) {
-    throw new AppError(403, 'FUNCTION_DENIED', 'Credentials require HR/admin.');
-  }
+  await authorizeCapability({ ctx: auth, capability: Capabilities.CREDENTIALS_MANAGE });
 
   const credentialId = c.req.param('credentialId');
   const body = z
@@ -586,11 +521,13 @@ staffRoutes.patch('/credentials/:credentialId', csrfGuardMiddleware, async (c) =
     )
     .limit(1);
   if (!existing) throw new AppError(404, 'NOT_FOUND', 'Credential not found.');
-  assertRowVersionMatch(body.rowVersion, existing.rowVersion, 'Credential');
 
-  const [cred] = await db
-    .update(userCredentials)
-    .set({
+  const cred = await updateWithRowVersion(userCredentials, {
+    organizationId: auth.organizationId,
+    id: credentialId,
+    expectedVersion: body.rowVersion,
+    notFoundMessage: 'Credential not found.',
+    set: {
       number: body.number ?? existing.number,
       issuingBody: body.issuingBody ?? existing.issuingBody,
       effectiveOn:
@@ -598,15 +535,8 @@ staffRoutes.patch('/credentials/:credentialId', csrfGuardMiddleware, async (c) =
       expiresOn: body.expiresOn !== undefined ? body.expiresOn : existing.expiresOn,
       status: body.status ?? existing.status,
       updatedAt: new Date(),
-      rowVersion: nextRowVersion(existing.rowVersion),
-    })
-    .where(
-      and(
-        eq(userCredentials.organizationId, auth.organizationId),
-        eq(userCredentials.id, credentialId),
-      ),
-    )
-    .returning();
+    },
+  });
 
   await writeAuditEntry({
     organizationId: auth.organizationId,
@@ -623,14 +553,7 @@ staffRoutes.patch('/credentials/:credentialId', csrfGuardMiddleware, async (c) =
 
 staffRoutes.post('/assignments', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.OPERATIONAL_CREATE });
-  if (
-    !auth.functionCodes.includes('hr_credentialing') &&
-    !auth.functionCodes.includes('org_admin') &&
-    !auth.functionCodes.includes('scheduling')
-  ) {
-    throw new AppError(403, 'FUNCTION_DENIED', 'Assignments require scheduling/HR/admin.');
-  }
+  await authorizeCapability({ ctx: auth, capability: Capabilities.ASSIGNMENTS_MANAGE });
 
   const body = z
     .object({
@@ -679,8 +602,10 @@ staffRoutes.post('/assignments', csrfGuardMiddleware, async (c) => {
 
 staffRoutes.post('/assignments/:id/end', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.OPERATIONAL_EDIT });
+  await authorizeCapability({ ctx: auth, capability: Capabilities.ASSIGNMENTS_MANAGE });
   const id = c.req.param('id');
+  const body = z.object({ rowVersion: z.number().int() }).parse(await c.req.json());
+
   const db = getDb();
   const [existing] = await db
     .select()
@@ -694,21 +619,17 @@ staffRoutes.post('/assignments/:id/end', csrfGuardMiddleware, async (c) => {
     .limit(1);
   if (!existing) throw new AppError(404, 'NOT_FOUND', 'Assignment not found.');
 
-  const [assignment] = await db
-    .update(clientAssignments)
-    .set({
+  const assignment = await updateWithRowVersion(clientAssignments, {
+    organizationId: auth.organizationId,
+    id,
+    expectedVersion: body.rowVersion,
+    notFoundMessage: 'Assignment not found.',
+    set: {
       status: 'ended',
       effectiveTo: new Date(),
       updatedAt: new Date(),
-      rowVersion: nextRowVersion(existing.rowVersion),
-    })
-    .where(
-      and(
-        eq(clientAssignments.organizationId, auth.organizationId),
-        eq(clientAssignments.id, id),
-      ),
-    )
-    .returning();
+    },
+  });
 
   await writeAuditEntry({
     organizationId: auth.organizationId,

@@ -22,7 +22,10 @@ export interface Client {
   borderColor: string;
   textColor: string;
   diagnosis?: string;
+  /** Operational stage — Active / Onboarding / Maintenance (not lifecycle). */
   status: 'Active' | 'Onboarding' | 'Maintenance';
+  /** Lifecycle status from API — active / inactive / discharged. */
+  lifecycleStatus?: 'active' | 'inactive' | 'discharged';
   authorizedHours?: number; // Weekly authorized hours -- treatment-context only, not a billing/units record
 
   // Clinical context, optional so existing mock/demo clients keep working untouched.
@@ -136,13 +139,19 @@ export interface ActivityLogEntry {
   user: string; // Mocked for now (e.g. "Dr. Smith")
 }
 
+export type ClinicalCeiling = 'NONE' | 'RBT' | 'BCABA' | 'BCBA';
+
 export interface User {
   id: string;
   name: string;
   email: string;
   password?: string; // In real app, this would be hashed
-  role: 'BCBA' | 'RBT' | 'Admin';
+  role: 'BCBA' | 'BCaBA' | 'RBT' | 'Admin';
   avatar?: string;
+  /** Operational function grants from API auth. */
+  functions?: { code: string; name?: string; scopeMode: string }[];
+  /** Credential-derived clinical ceiling — role is derived from this in API mode. */
+  clinicalCeiling?: ClinicalCeiling;
 }
 
 // --- Session documentation (Notes tab) ---

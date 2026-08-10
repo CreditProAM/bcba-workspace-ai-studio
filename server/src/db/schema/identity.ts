@@ -122,6 +122,8 @@ export const credentialDefinitions = pgTable(
       .references(() => organizations.id),
     code: text('code').notNull(),
     name: text('name').notNull(),
+    /** Explicit clinical authority — never inferred from code string matching. */
+    clinicalAuthority: text('clinical_authority').notNull().default('NONE'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     rowVersion: integer('row_version').notNull().default(1),

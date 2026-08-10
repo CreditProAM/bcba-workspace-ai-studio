@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, or } from 'drizzle-orm';
+import { and, eq, gt, gte, isNull, lte, or } from 'drizzle-orm';
 import { getDb } from '../../db/client.js';
 import {
   clientAssignments,
@@ -7,8 +7,9 @@ import {
   organizationMemberships,
 } from '../../db/schema/index.js';
 import { AppError } from '../../shared/errors.js';
+import { grantsForCapability, type Capability } from './capabilities.js';
 import { ceilingAllows, resolveClinicalCeiling, type ClinicalCeiling } from './ceiling.js';
-import { CLINICAL_VERBS, FUNCTION_VERBS, type Verb } from './verbs.js';
+import { CLINICAL_VERBS, type Verb } from './verbs.js';
 
 export type AuthContext = {
   userId: string;
@@ -54,7 +55,6 @@ export async function loadAuthzContext(
     .select({
       code: operationalFunctions.code,
       scopeMode: functionGrants.scopeMode,
-      effectiveTo: functionGrants.effectiveTo,
     })
     .from(functionGrants)
     .innerJoin(operationalFunctions, eq(operationalFunctions.id, functionGrants.functionId))
@@ -62,6 +62,7 @@ export async function loadAuthzContext(
       and(
         eq(functionGrants.organizationId, organizationId),
         eq(functionGrants.membershipId, membership.id),
+        lte(functionGrants.effectiveFrom, now),
         or(isNull(functionGrants.effectiveTo), gt(functionGrants.effectiveTo, now)),
       ),
     );
@@ -84,40 +85,43 @@ export async function loadAuthzContext(
   };
 }
 
-export type AuthorizeInput = {
+export type AuthorizeCapabilityInput = {
   ctx: AuthContext;
-  verb: Verb;
+  capability: Capability;
   clientId?: string;
-  /** For CLINICAL_REVIEW/APPROVE of another's work */
-  subjectAuthorUserId?: string;
-  /**
-   * When true, ASSIGNED_CLIENTS grants may authorize without a clientId
-   * (list endpoints filter by assignment afterwards).
-   */
   allowUnscopedList?: boolean;
+  /** Optional clinical verb check layered on capability. */
+  clinicalVerb?: Verb;
+  subjectAuthorUserId?: string;
 };
 
-export async function authorize(input: AuthorizeInput): Promise<void> {
-  const { ctx, verb, clientId, subjectAuthorUserId, allowUnscopedList } = input;
+/**
+ * Domain-qualified authorization. Scope is derived only from grants that
+ * match the requested capability — never from unrelated ORGANIZATION grants.
+ */
+export async function authorizeCapability(input: AuthorizeCapabilityInput): Promise<void> {
+  const { ctx, capability, clientId, allowUnscopedList, clinicalVerb, subjectAuthorUserId } =
+    input;
 
-  const matchingGrants = ctx.grants.filter((g) =>
-    (FUNCTION_VERBS[g.code] ?? []).includes(verb),
-  );
-  if (matchingGrants.length === 0) {
-    throw new AppError(403, 'FUNCTION_DENIED', `Function grant does not allow ${verb}.`);
+  const matching = grantsForCapability(ctx.grants, capability);
+  if (matching.length === 0) {
+    throw new AppError(
+      403,
+      'CAPABILITY_DENIED',
+      `No Function grant allows capability ${capability}.`,
+    );
   }
 
-  if (CLINICAL_VERBS.has(verb)) {
-    if (!ceilingAllows(ctx.ceiling, verb)) {
+  if (clinicalVerb && CLINICAL_VERBS.has(clinicalVerb)) {
+    if (!ceilingAllows(ctx.ceiling, clinicalVerb)) {
       throw new AppError(
         403,
         'CLINICAL_CEILING_DENIED',
-        `Clinical authority ceiling (${ctx.ceiling}) does not allow ${verb}.`,
+        `Clinical authority ceiling (${ctx.ceiling}) does not allow ${clinicalVerb}.`,
       );
     }
-    // BCaBA/RBT cannot review/approve another provider's work — already ceiling-blocked for REVIEW.
     if (
-      (verb === 'CLINICAL_EDIT' || verb === 'CLINICAL_AUTHOR') &&
+      (clinicalVerb === 'CLINICAL_EDIT' || clinicalVerb === 'CLINICAL_AUTHOR') &&
       subjectAuthorUserId &&
       subjectAuthorUserId !== ctx.userId &&
       ctx.ceiling !== 'BCBA'
@@ -125,13 +129,13 @@ export async function authorize(input: AuthorizeInput): Promise<void> {
       throw new AppError(
         403,
         'CLINICAL_CEILING_DENIED',
-        'Cannot clinically edit another provider\'s work at this ceiling.',
+        "Cannot clinically edit another provider's work at this ceiling.",
       );
     }
   }
 
-  const needsClientScope = matchingGrants.every((g) => g.scopeMode === 'ASSIGNED_CLIENTS');
-  const hasOrgScope = matchingGrants.some((g) => g.scopeMode === 'ORGANIZATION');
+  const hasOrgScope = matching.some((g) => g.scopeMode === 'ORGANIZATION');
+  const needsClientScope = matching.every((g) => g.scopeMode === 'ASSIGNED_CLIENTS');
 
   if (!hasOrgScope && needsClientScope) {
     if (!clientId) {
@@ -158,6 +162,61 @@ export async function authorize(input: AuthorizeInput): Promise<void> {
   }
 }
 
+/** @deprecated Prefer authorizeCapability for Wave 1.1+ domain checks. */
+export type AuthorizeInput = {
+  ctx: AuthContext;
+  verb: Verb;
+  clientId?: string;
+  subjectAuthorUserId?: string;
+  allowUnscopedList?: boolean;
+};
+
+export async function authorize(input: AuthorizeInput): Promise<void> {
+  // Legacy verb path kept for clinical unit tests; no domain mapping.
+  const { ctx, verb, clientId, subjectAuthorUserId, allowUnscopedList } = input;
+  const { FUNCTION_VERBS } = await import('./verbs.js');
+  const matchingGrants = ctx.grants.filter((g) =>
+    (FUNCTION_VERBS[g.code] ?? []).includes(verb),
+  );
+  if (matchingGrants.length === 0) {
+    throw new AppError(403, 'FUNCTION_DENIED', `Function grant does not allow ${verb}.`);
+  }
+  if (CLINICAL_VERBS.has(verb)) {
+    if (!ceilingAllows(ctx.ceiling, verb)) {
+      throw new AppError(
+        403,
+        'CLINICAL_CEILING_DENIED',
+        `Clinical authority ceiling (${ctx.ceiling}) does not allow ${verb}.`,
+      );
+    }
+    if (
+      (verb === 'CLINICAL_EDIT' || verb === 'CLINICAL_AUTHOR') &&
+      subjectAuthorUserId &&
+      subjectAuthorUserId !== ctx.userId &&
+      ctx.ceiling !== 'BCBA'
+    ) {
+      throw new AppError(
+        403,
+        'CLINICAL_CEILING_DENIED',
+        "Cannot clinically edit another provider's work at this ceiling.",
+      );
+    }
+  }
+  const hasOrgScope = matchingGrants.some((g) => g.scopeMode === 'ORGANIZATION');
+  const needsClientScope = matchingGrants.every((g) => g.scopeMode === 'ASSIGNED_CLIENTS');
+  if (!hasOrgScope && needsClientScope) {
+    if (!clientId) {
+      if (allowUnscopedList) return;
+      throw new AppError(403, 'CLIENT_SCOPE_REQUIRED', 'Client assignment scope required.');
+    }
+    const ok = await hasActiveClientAssignment(ctx.organizationId, ctx.userId, clientId);
+    if (!ok) {
+      throw new AppError(403, 'CLIENT_SCOPE_DENIED', 'No active client assignment.');
+    }
+  }
+  void gte;
+}
+
 async function hasActiveClientAssignment(
   organizationId: string,
   userId: string,
@@ -181,8 +240,12 @@ async function hasActiveClientAssignment(
   return Boolean(row);
 }
 
-/** Test helper: run authorize without HTTP. */
 export async function assertAuthorized(input: AuthorizeInput): Promise<boolean> {
   await authorize(input);
+  return true;
+}
+
+export async function assertCapability(input: AuthorizeCapabilityInput): Promise<boolean> {
+  await authorizeCapability(input);
   return true;
 }

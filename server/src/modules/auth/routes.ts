@@ -10,6 +10,7 @@ import {
   requireAuthMiddleware,
 } from '../../middleware/authContext.js';
 import { writeAuditEntry } from '../platform/audit.js';
+import { loadAuthzContext } from '../authz/authorize.js';
 import { normalizeEmail, verifyPassword } from '../../shared/crypto.js';
 import { AppError } from '../../shared/errors.js';
 import {
@@ -79,6 +80,13 @@ authRoutes.post('/auth/login', async (c) => {
 
   setCookie(c, SESSION_COOKIE, tokens.sessionToken, cookieOptions());
 
+  const authz = await loadAuthzContext(
+    user.id,
+    selected.membership.organizationId,
+    tokens.sessionId,
+    { email: user.email, displayName: user.displayName },
+  );
+
   await writeAuditEntry({
     organizationId: selected.membership.organizationId,
     actorUserId: user.id,
@@ -100,6 +108,8 @@ authRoutes.post('/auth/login', async (c) => {
     },
     membershipId: selected.membership.id,
     csrfToken: tokens.csrfToken,
+    functions: authz.grants,
+    clinicalCeiling: authz.ceiling,
   });
 });
 

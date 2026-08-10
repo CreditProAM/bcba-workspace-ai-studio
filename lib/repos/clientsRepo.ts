@@ -43,11 +43,16 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
+function operationalStatusFromStage(
+  stage?: 'onboarding' | 'maintenance' | 'standard' | null,
+): Client['status'] {
+  if (stage === 'onboarding') return 'Onboarding';
+  if (stage === 'maintenance') return 'Maintenance';
+  return 'Active';
+}
+
 export function mapApiClientToClient(row: ApiClientRecord): Client {
   const palette = paletteForId(row.id);
-  let status: Client['status'] = 'Active';
-  if (row.operationalStage === 'onboarding') status = 'Onboarding';
-  else if (row.operationalStage === 'maintenance') status = 'Maintenance';
 
   return {
     id: row.id,
@@ -57,25 +62,27 @@ export function mapApiClientToClient(row: ApiClientRecord): Client {
     borderColor: row.borderColor || palette.b,
     textColor: row.textColor || palette.t,
     diagnosis: row.diagnosis ?? undefined,
-    status,
+    lifecycleStatus: row.status,
+    status: operationalStatusFromStage(row.operationalStage),
     authorizedHours: row.authorizedHours,
     age: row.age ?? undefined,
     rowVersion: row.rowVersion,
   };
 }
 
-function mapStatusToApi(status: Client['status']): {
+function mapStatusToApi(
+  status: Client['status'],
+  lifecycleStatus?: Client['lifecycleStatus'],
+): {
   status: 'active' | 'inactive' | 'discharged';
   operationalStage: 'onboarding' | 'maintenance' | 'standard' | null;
 } {
-  switch (status) {
-    case 'Onboarding':
-      return { status: 'active', operationalStage: 'onboarding' };
-    case 'Maintenance':
-      return { status: 'active', operationalStage: 'maintenance' };
-    default:
-      return { status: 'active', operationalStage: 'standard' };
-  }
+  const lifecycle = lifecycleStatus ?? 'active';
+  let operationalStage: 'onboarding' | 'maintenance' | 'standard' | null = 'standard';
+  if (status === 'Onboarding') operationalStage = 'onboarding';
+  else if (status === 'Maintenance') operationalStage = 'maintenance';
+
+  return { status: lifecycle, operationalStage };
 }
 
 export type ClientSaveInput = {
@@ -83,6 +90,7 @@ export type ClientSaveInput = {
   name: string;
   diagnosis: string;
   status: Client['status'];
+  lifecycleStatus?: Client['lifecycleStatus'];
   imageUrl?: string;
   authorizedHours?: number;
   age?: number;
@@ -93,7 +101,7 @@ export async function listClients(localClients: Client[]): Promise<Client[]> {
     return localClients;
   }
   const res = await apiFetch<{ clients: ApiClientRecord[] }>('/api/v1/clients');
-  return res.clients.filter((r) => r.status === 'active').map(mapApiClientToClient);
+  return res.clients.map(mapApiClientToClient);
 }
 
 export async function getClient(id: string, localClients: Client[]): Promise<Client | null> {
@@ -105,7 +113,7 @@ export async function getClient(id: string, localClients: Client[]): Promise<Cli
 }
 
 export async function createClient(input: ClientSaveInput): Promise<Client> {
-  const mapped = mapStatusToApi(input.status);
+  const mapped = mapStatusToApi(input.status, input.lifecycleStatus);
   const res = await apiFetch<{ client: ApiClientRecord }>('/api/v1/clients', {
     method: 'POST',
     body: {
@@ -133,7 +141,7 @@ export async function updateClient(
   input: ClientSaveInput,
   existing: Client,
 ): Promise<Client> {
-  const mapped = mapStatusToApi(input.status);
+  const mapped = mapStatusToApi(input.status, input.lifecycleStatus ?? existing.lifecycleStatus);
   const rowVersion = existing.rowVersion;
   if (rowVersion == null) {
     throw new Error('Client rowVersion missing; refetch before update.');
@@ -162,7 +170,7 @@ export async function updateClient(
 export async function lifecycleClient(
   id: string,
   existing: Client,
-  status: 'inactive' | 'discharged' = 'inactive',
+  status: 'active' | 'inactive' | 'discharged' = 'inactive',
 ): Promise<Client> {
   const rowVersion = existing.rowVersion;
   if (rowVersion == null) {
@@ -188,7 +196,7 @@ export async function importLocalClients(clients: Client[]): Promise<ImportLocal
       clients: clients.map((c) => ({
         legacyId: c.id,
         name: c.name,
-        status: c.status,
+        status: c.lifecycleStatus ?? 'active',
         operationalStage:
           c.status === 'Onboarding'
             ? 'onboarding'
@@ -222,6 +230,7 @@ export function saveClientLocal(
       name: input.name,
       diagnosis: input.diagnosis,
       status: input.status,
+      lifecycleStatus: input.lifecycleStatus ?? existing.lifecycleStatus,
       imageUrl: input.imageUrl,
       avatar: input.name
         .split(' ')
@@ -252,6 +261,7 @@ export function saveClientLocal(
     textColor: palette.t,
     diagnosis: input.diagnosis,
     status: input.status,
+    lifecycleStatus: input.lifecycleStatus ?? 'active',
     imageUrl: input.imageUrl,
     authorizedHours: 15,
   };

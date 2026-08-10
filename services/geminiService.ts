@@ -38,7 +38,21 @@ import { GoogleGenAI, Chat, FunctionDeclaration, Type } from "@google/genai";
 import { CalendarEvent, Client, SessionNote } from "../types";
 import { PromptTemplate, ToolkitSessionContext, StructuredPromptOutput, TOOLKIT_DISCLAIMER } from "../components/toolkit/toolkitTypes";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+/** Lazy client — do not construct at module load (SDK throws without a key in browser). */
+let aiClient: GoogleGenAI | null = null;
+
+function getAi(): GoogleGenAI {
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      'Gemini is not configured. Set GEMINI_API_KEY in .env.local to use AI features.',
+    );
+  }
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({ apiKey });
+  }
+  return aiClient;
+}
 
 // ---------------------------------------------------------------------------
 // Sidekick -- function-calling agent (Today tab)
@@ -115,7 +129,7 @@ export const chatWithSidekick = async (
 
   // 2. Call the API
   try {
-    const response = await ai.models.generateContent({
+    const response = await getAi().models.generateContent({
       model: modelId,
       contents: [
         ...history, 
@@ -181,7 +195,7 @@ export const generateClientSummary = async (client: Client, events: CalendarEven
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await getAi().models.generateContent({
       model: modelId,
       contents: prompt,
       config: {
@@ -287,7 +301,7 @@ export const generateSessionNarrative = async (
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await getAi().models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
     });
@@ -342,7 +356,7 @@ export const suggestRescheduling = async (
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await getAi().models.generateContent({
       model: modelId,
       contents: prompt,
       config: {
@@ -440,7 +454,7 @@ export const generateToolkitResponse = async (
   const fullPrompt = sanitizePromptInput(injectPromptTemplate(template));
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await getAi().models.generateContent({
       model: 'gemini-2.5-flash',
       contents: fullPrompt,
       config: {
@@ -461,7 +475,7 @@ export const generateToolkitResponse = async (
 
 /** Starts (or continues) a grounded follow-up chat about a specific Toolkit response. */
 export const createToolkitFollowUpChat = (template: PromptTemplate, initialResponseText: string): Chat => {
-  return ai.chats.create({
+  return getAi().chats.create({
     model: 'gemini-2.5-flash',
     history: [
       { role: 'user', parts: [{ text: template.prompt }] },

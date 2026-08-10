@@ -36,6 +36,10 @@ import { isApiDomain } from './lib/cutover';
 import * as authRepo from './lib/repos/authRepo';
 import * as clientsRepo from './lib/repos/clientsRepo';
 import {
+  canLocalClinicalMutation,
+  type ClinicalMutationAction,
+} from './lib/clinicalAuthority';
+import {
   ClinicalOverlayMap,
   applyOverlayToMap,
   extractClinicalOverlay,
@@ -375,6 +379,17 @@ function App() {
   const [contextMenu, setContextMenu] = useState<{ type: ContextMenuType, coords: ContextMenuCoords, data: any } | null>(null);
 
   const handleSaveServicePlan = (plan: ServicePlan) => {
+    if (
+      isApiDomain('auth') &&
+      !canLocalClinicalMutation(currentUser, 'edit')
+    ) {
+      addToast(
+        'Action Denied',
+        'Your clinical authority does not permit editing service plans.',
+        <ShieldCheck size={20} className="text-amber-500" />,
+      );
+      return;
+    }
     const existing = (appState.servicePlans || []);
     const idx = existing.findIndex(p => p.id === plan.id);
     let updated;
@@ -390,6 +405,17 @@ function App() {
   };
 
   const handleSaveProgramToLibrary = (program: ClinicalProgram) => {
+    if (
+      isApiDomain('auth') &&
+      !canLocalClinicalMutation(currentUser, 'edit')
+    ) {
+      addToast(
+        'Action Denied',
+        'Your clinical authority does not permit editing the program library.',
+        <ShieldCheck size={20} className="text-amber-500" />,
+      );
+      return;
+    }
     const existing = (appState.programLibrary || []);
     const idx = existing.findIndex(p => p.id === program.id);
     let updated;
@@ -734,11 +760,52 @@ function App() {
   // These live on the client record inside appState, so they automatically
   // participate in the same undo/redo history and autosave as everything else.
 
+  const clinicalActionDenied = (action: ClinicalMutationAction) => {
+    addToast(
+      'Action Denied',
+      `Your clinical authority does not permit this action (${action}).`,
+      <ShieldCheck size={20} className="text-amber-500" />,
+    );
+  };
+
+  const guardClinicalMutation = (
+    action: ClinicalMutationAction,
+    opts?: { authorUserId?: string },
+  ): boolean => {
+    if (!isApiDomain('auth')) return true;
+    if (!canLocalClinicalMutation(currentUser, action, opts)) {
+      clinicalActionDenied(action);
+      return false;
+    }
+    return true;
+  };
+
+  const noteClinicalAction = (
+    noteData: Omit<SessionNote, 'id'> & { id?: string },
+    existingNote: SessionNote | undefined,
+  ): ClinicalMutationAction => {
+    if (
+      noteData.status === 'Completed' &&
+      existingNote?.status === 'Pending Review'
+    ) {
+      return 'approve';
+    }
+    const authorId = existingNote?.authorId ?? noteData.authorId ?? currentUser?.id;
+    if (!existingNote) return 'author';
+    if (authorId && currentUser?.id && authorId !== currentUser.id) return 'edit';
+    return currentUser?.clinicalCeiling === 'RBT' ? 'author' : 'edit';
+  };
+
   const upsertSessionNote = (clientId: string, noteData: Omit<SessionNote, 'id'> & { id?: string }) => {
     const client = clients.find((c) => c.id === clientId);
     if (!client) return;
     const existing = client.sessionNotes || [];
     const existingIndex = noteData.id ? existing.findIndex((n) => n.id === noteData.id) : -1;
+    const existingNote = existingIndex > -1 ? existing[existingIndex] : undefined;
+    const action = noteClinicalAction(noteData, existingNote);
+    if (!guardClinicalMutation(action, { authorUserId: existingNote?.authorId ?? noteData.authorId })) {
+      return;
+    }
     let updatedNotes: SessionNote[];
     if (existingIndex > -1) {
       updatedNotes = [...existing];
@@ -766,6 +833,8 @@ function App() {
     if (!client) return;
     const existing = client.assessments || [];
     const existingIndex = docData.id ? existing.findIndex((a) => a.id === docData.id) : -1;
+    const action: ClinicalMutationAction = existingIndex > -1 ? 'edit' : 'author';
+    if (!guardClinicalMutation(action)) return;
     let updated: Assessment[];
     if (existingIndex > -1) {
       updated = [...existing];
@@ -791,6 +860,8 @@ function App() {
     if (!client) return;
     const existing = client.parentTrainingLogs || [];
     const existingIndex = logData.id ? existing.findIndex((l) => l.id === logData.id) : -1;
+    const action: ClinicalMutationAction = existingIndex > -1 ? 'edit' : 'author';
+    if (!guardClinicalMutation(action)) return;
     let updated: ParentTrainingLog[];
     if (existingIndex > -1) {
       updated = [...existing];
@@ -912,6 +983,7 @@ function App() {
             clients={clients}
             onAddClient={handleAddClientClick}
             onClientClick={setSelectedClient}
+            onClientsChanged={() => queryClient.invalidateQueries({ queryKey: ['clients'] })}
           />
         );
       case 'notes': {

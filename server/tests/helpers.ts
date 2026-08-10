@@ -51,6 +51,8 @@ export async function loginAs(
   const body = (await res.json()) as {
     csrfToken?: string;
     user?: { id: string; email: string };
+    clinicalCeiling?: string;
+    functions?: { code: string; scopeMode: string }[];
     error?: { code: string; message: string };
   };
   const cookie = parseSetCookie(res);

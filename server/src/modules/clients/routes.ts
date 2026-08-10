@@ -8,10 +8,11 @@ import {
   optionalSessionMiddleware,
   requireAuthMiddleware,
 } from '../../middleware/authContext.js';
-import { assertRowVersionMatch, nextRowVersion } from '../../shared/concurrency.js';
 import { AppError } from '../../shared/errors.js';
-import { authorize } from '../authz/authorize.js';
-import { Verbs } from '../authz/verbs.js';
+import { assertSafeAvatar } from '../../shared/avatar.js';
+import { updateWithRowVersion } from '../../shared/optimistic.js';
+import { authorizeCapability } from '../authz/authorize.js';
+import { Capabilities, grantsForCapability } from '../authz/capabilities.js';
 import { writeAuditEntry } from '../platform/audit.js';
 import { createOrImportClient, mapClient } from './service.js';
 
@@ -21,12 +22,17 @@ clientRoutes.use('*', requireAuthMiddleware);
 
 clientRoutes.get('/clients', async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.VIEW, allowUnscopedList: true });
+  await authorizeCapability({
+    ctx: auth,
+    capability: Capabilities.CLIENTS_VIEW,
+    allowUnscopedList: true,
+  });
 
   const db = getDb();
-  const hasOrgView = auth.grants.some((g) => g.scopeMode === 'ORGANIZATION');
+  const matching = grantsForCapability(auth.grants, Capabilities.CLIENTS_VIEW);
+  const hasOrgScope = matching.some((g) => g.scopeMode === 'ORGANIZATION');
 
-  if (hasOrgView) {
+  if (hasOrgScope) {
     const rows = await db
       .select()
       .from(clients)
@@ -56,7 +62,7 @@ clientRoutes.get('/clients', async (c) => {
 
 clientRoutes.post('/clients/import-local', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.OPERATIONAL_CREATE });
+  await authorizeCapability({ ctx: auth, capability: Capabilities.CLIENTS_CREATE });
   const body = z
     .object({
       clients: z.array(
@@ -81,6 +87,7 @@ clientRoutes.post('/clients/import-local', csrfGuardMiddleware, async (c) => {
 
   const results = [];
   for (const item of body.clients) {
+    assertSafeAvatar(item.avatar);
     const status =
       item.status === 'Inactive' || item.status === 'inactive'
         ? 'inactive'
@@ -127,7 +134,7 @@ clientRoutes.post('/clients/import-local', csrfGuardMiddleware, async (c) => {
 clientRoutes.get('/clients/:id', async (c) => {
   const auth = c.get('auth')!;
   const id = c.req.param('id');
-  await authorize({ ctx: auth, verb: Verbs.VIEW, clientId: id });
+  await authorizeCapability({ ctx: auth, capability: Capabilities.CLIENTS_VIEW, clientId: id });
   const db = getDb();
   const [row] = await db
     .select()
@@ -163,8 +170,9 @@ const createSchema = z.object({
 
 clientRoutes.post('/clients', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
-  await authorize({ ctx: auth, verb: Verbs.OPERATIONAL_CREATE });
+  await authorizeCapability({ ctx: auth, capability: Capabilities.CLIENTS_CREATE });
   const body = createSchema.parse(await c.req.json());
+  assertSafeAvatar(body.avatar);
   const result = await createOrImportClient({
     organizationId: auth.organizationId,
     actorUserId: auth.userId,
@@ -181,8 +189,10 @@ const patchSchema = createSchema.partial().extend({
 clientRoutes.patch('/clients/:id', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
   const id = c.req.param('id');
-  await authorize({ ctx: auth, verb: Verbs.OPERATIONAL_EDIT, clientId: id });
+  await authorizeCapability({ ctx: auth, capability: Capabilities.CLIENTS_EDIT, clientId: id });
   const body = patchSchema.parse(await c.req.json());
+  if (body.avatar !== undefined) assertSafeAvatar(body.avatar);
+
   const db = getDb();
   const [existing] = await db
     .select()
@@ -190,11 +200,13 @@ clientRoutes.patch('/clients/:id', csrfGuardMiddleware, async (c) => {
     .where(and(eq(clients.organizationId, auth.organizationId), eq(clients.id, id)))
     .limit(1);
   if (!existing) throw new AppError(404, 'NOT_FOUND', 'Client not found.');
-  assertRowVersionMatch(body.rowVersion, existing.rowVersion, 'Client');
 
-  const [row] = await db
-    .update(clients)
-    .set({
+  const row = await updateWithRowVersion(clients, {
+    organizationId: auth.organizationId,
+    id,
+    expectedVersion: body.rowVersion,
+    notFoundMessage: 'Client not found.',
+    set: {
       legalName: body.legalName ?? existing.legalName,
       preferredName: body.preferredName ?? existing.preferredName,
       operationalStage:
@@ -214,10 +226,8 @@ clientRoutes.patch('/clients/:id', csrfGuardMiddleware, async (c) => {
       avatar: body.avatar ?? existing.avatar,
       diagnosisText: body.diagnosisText ?? existing.diagnosisText,
       updatedAt: new Date(),
-      rowVersion: nextRowVersion(existing.rowVersion),
-    })
-    .where(and(eq(clients.organizationId, auth.organizationId), eq(clients.id, id)))
-    .returning();
+    },
+  });
 
   await writeAuditEntry({
     organizationId: auth.organizationId,
@@ -229,13 +239,17 @@ clientRoutes.patch('/clients/:id', csrfGuardMiddleware, async (c) => {
     afterJson: { rowVersion: row.rowVersion },
   });
 
-  return c.json({ client: mapClient(row) });
+  return c.json({ client: mapClient(row as typeof existing) });
 });
 
 clientRoutes.post('/clients/:id/lifecycle', csrfGuardMiddleware, async (c) => {
   const auth = c.get('auth')!;
   const id = c.req.param('id');
-  await authorize({ ctx: auth, verb: Verbs.ARCHIVE_DEACTIVATE, clientId: id });
+  await authorizeCapability({
+    ctx: auth,
+    capability: Capabilities.CLIENTS_LIFECYCLE,
+    clientId: id,
+  });
   const body = z
     .object({
       status: z.enum(['active', 'inactive', 'discharged']),
@@ -251,17 +265,17 @@ clientRoutes.post('/clients/:id/lifecycle', csrfGuardMiddleware, async (c) => {
     .where(and(eq(clients.organizationId, auth.organizationId), eq(clients.id, id)))
     .limit(1);
   if (!existing) throw new AppError(404, 'NOT_FOUND', 'Client not found.');
-  assertRowVersionMatch(body.rowVersion, existing.rowVersion, 'Client');
 
-  const [row] = await db
-    .update(clients)
-    .set({
+  const row = await updateWithRowVersion(clients, {
+    organizationId: auth.organizationId,
+    id,
+    expectedVersion: body.rowVersion,
+    notFoundMessage: 'Client not found.',
+    set: {
       status: body.status,
       updatedAt: new Date(),
-      rowVersion: nextRowVersion(existing.rowVersion),
-    })
-    .where(and(eq(clients.organizationId, auth.organizationId), eq(clients.id, id)))
-    .returning();
+    },
+  });
 
   await writeAuditEntry({
     organizationId: auth.organizationId,
@@ -274,7 +288,7 @@ clientRoutes.post('/clients/:id/lifecycle', csrfGuardMiddleware, async (c) => {
     reason: body.reason ?? null,
   });
 
-  return c.json({ client: mapClient(row) });
+  return c.json({ client: mapClient(row as typeof existing) });
 });
 
 clientRoutes.delete('/clients/:id', async () => {

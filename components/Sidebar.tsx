@@ -165,7 +165,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                
                <div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 h-0 opacity-0' : 'w-auto opacity-100'}`}>
                    <div className="text-xs font-bold text-white truncate max-w-[120px]">{currentUser.name}</div>
-                   <div className="text-[10px] text-slate-400">BCBA</div>
+                   <div className="text-[10px] text-slate-400">
+                     {currentUser.clinicalCeiling ?? currentUser.role}
+                   </div>
                </div>
 
                <button 

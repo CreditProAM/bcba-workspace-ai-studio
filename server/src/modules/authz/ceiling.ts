@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, eq, lte, or, isNull, gte } from 'drizzle-orm';
 import { getDb } from '../../db/client.js';
 import { credentialDefinitions, userCredentials } from '../../db/schema/index.js';
 import { Verbs, type Verb } from './verbs.js';
@@ -12,12 +12,17 @@ const CEILING_RANK: Record<ClinicalCeiling, number> = {
   BCBA: 3,
 };
 
-function codeToCeiling(code: string): ClinicalCeiling {
-  const c = code.trim().toUpperCase();
-  if (c === 'RBT' || c.includes('RBT')) return 'RBT';
-  if (c === 'BCABA' || c.includes('BCABA')) return 'BCABA';
-  if (c === 'BCBA' || c.includes('BCBA')) return 'BCBA';
+const VALID: ReadonlySet<string> = new Set(['NONE', 'RBT', 'BCABA', 'BCBA']);
+
+function authorityToCeiling(authority: string | null | undefined): ClinicalCeiling {
+  const a = (authority ?? 'NONE').trim().toUpperCase();
+  if (VALID.has(a)) return a as ClinicalCeiling;
   return 'NONE';
+}
+
+/** Calendar date YYYY-MM-DD in UTC for effective_on / expires_on checks. */
+export function utcDateString(at: Date = new Date()): string {
+  return at.toISOString().slice(0, 10);
 }
 
 export async function resolveClinicalCeiling(
@@ -26,10 +31,12 @@ export async function resolveClinicalCeiling(
   at: Date = new Date(),
 ): Promise<ClinicalCeiling> {
   const db = getDb();
+  const today = utcDateString(at);
   const rows = await db
     .select({
-      code: credentialDefinitions.code,
+      clinicalAuthority: credentialDefinitions.clinicalAuthority,
       status: userCredentials.status,
+      effectiveOn: userCredentials.effectiveOn,
       expiresOn: userCredentials.expiresOn,
     })
     .from(userCredentials)
@@ -45,14 +52,14 @@ export async function resolveClinicalCeiling(
         eq(userCredentials.organizationId, organizationId),
         eq(userCredentials.userId, userId),
         eq(userCredentials.status, 'active'),
+        or(isNull(userCredentials.effectiveOn), lte(userCredentials.effectiveOn, today)),
+        or(isNull(userCredentials.expiresOn), gte(userCredentials.expiresOn, today)),
       ),
     );
 
   let best: ClinicalCeiling = 'NONE';
   for (const row of rows) {
-    if (row.status !== 'active') continue;
-    if (row.expiresOn && new Date(row.expiresOn) < at) continue;
-    const ceiling = codeToCeiling(row.code);
+    const ceiling = authorityToCeiling(row.clinicalAuthority);
     if (CEILING_RANK[ceiling] > CEILING_RANK[best]) best = ceiling;
   }
   return best;

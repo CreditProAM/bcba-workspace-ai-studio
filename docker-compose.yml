@@ -1,0 +1,25 @@
+# Development-only PostgreSQL for Wave 0+.
+# Credentials are intentionally non-production.
+# If Docker Desktop is unavailable, equivalent local Homebrew PostgreSQL 16
+# with the same user/db/password is an acceptable Wave 0/1 dev substitute.
+services:
+  postgres:
+    image: postgres:16
+    container_name: bcba-workspace-pg
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: bcba
+      POSTGRES_PASSWORD: bcba_dev_only
+      POSTGRES_DB: bcba_workspace
+    volumes:
+      - bcba_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bcba -d bcba_workspace"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  bcba_pg_data:

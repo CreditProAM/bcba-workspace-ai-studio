@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "server:dev": "npm run dev --prefix server",
+    "server:test": "npm run test --prefix server",
+    "server:migrate": "npm run db:migrate --prefix server",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^1.33.0",

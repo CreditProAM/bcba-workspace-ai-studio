@@ -16,8 +16,15 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+server/.env
+server/.env.*
+!server/.env.example
 *.pem
 *.key
+
+# Server local data / temp DB artifacts
+server/.data/
+server/.drizzle-tmp/
 
 # Archives (not source)
 *.zip

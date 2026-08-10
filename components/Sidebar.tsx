@@ -12,10 +12,12 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Puzzle,
-  LogOut
+  LogOut,
+  UserCog,
 } from 'lucide-react';
 import { User } from '../types';
 import type { PrimaryTab } from '../App';
+import { isApiDomain } from '../lib/cutover';
 
 interface SidebarProps {
   onSettingsClick?: () => void;
@@ -53,6 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'supervision', icon: ClipboardCheck, label: 'Supervision' },
     { id: 'data', icon: LineChart, label: 'Data' },
     { id: 'toolkit', icon: ToolkitIcon, label: 'Toolkit' },
+    ...(isApiDomain('staff') ? [{ id: 'staff', icon: UserCog, label: 'Staff' }] : []),
   ];
 
   // Secondary/utility items: available, but intentionally not part of the primary 6-item workflow nav.

@@ -1,21 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Clock, Download, Upload, Database } from 'lucide-react';
+import { X, Save, Clock, Download, Upload, Database, CloudUpload, Loader2 } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   workHours: { start: number; end: number };
   onSave: (hours: { start: number; end: number }) => void;
+  showImportToApi?: boolean;
+  onImportLocalToApi?: () => Promise<void>;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
   isOpen, 
   onClose, 
   workHours, 
-  onSave 
+  onSave,
+  showImportToApi,
+  onImportLocalToApi,
 }) => {
   const [start, setStart] = useState(workHours.start);
   const [end, setEnd] = useState(workHours.end);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -75,6 +80,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
     };
     reader.readAsText(file);
+  };
+
+  const handleImportToApi = async () => {
+    if (!onImportLocalToApi) return;
+    setImporting(true);
+    try {
+      await onImportLocalToApi();
+      alert('Local clients imported to API successfully.');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Import failed.');
+    } finally {
+      setImporting(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -195,6 +213,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
              </div>
           </div>
+
+          {showImportToApi && onImportLocalToApi && (
+            <>
+              <div className="h-px bg-slate-100 w-full" />
+              <div className="space-y-4">
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 flex gap-4 items-start">
+                  <div className="p-2 bg-amber-100 rounded-lg text-amber-700">
+                    <CloudUpload size={20} strokeWidth={1.5} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-amber-900 text-sm">Import Local Clients to API</h4>
+                    <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                      One-time migration: push client demographics from local storage into the backend.
+                      Clinical notes remain local until a future wave.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleImportToApi}
+                  disabled={importing}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-sm font-bold shadow-sm transition-all disabled:opacity-70"
+                >
+                  {importing ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <CloudUpload size={16} strokeWidth={1.5} />
+                  )}
+                  Import local clients to API
+                </button>
+              </div>
+            </>
+          )}
 
         </div>
 

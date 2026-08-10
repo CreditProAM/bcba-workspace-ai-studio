@@ -1,10 +1,12 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { WeekView } from './components/WeekView';
 import { MonthView } from './components/MonthView';
 import { CaseloadView } from './components/CaseloadView';
+import { StaffView } from './components/StaffView';
 import { SupervisionView } from './components/SupervisionView';
 import { SupervisionLogModal } from './components/SupervisionLogModal';
 import { ActivityView } from './components/ActivityView';
@@ -30,6 +32,15 @@ import { useHistory } from './hooks/useHistory';
 import { useAutoSave } from './hooks/useAutoSave';
 import { Bell, X, ShieldCheck, Clipboard, Sparkles, CheckCircle2 } from 'lucide-react';
 import { suggestRescheduling } from './services/geminiService';
+import { isApiDomain } from './lib/cutover';
+import * as authRepo from './lib/repos/authRepo';
+import * as clientsRepo from './lib/repos/clientsRepo';
+import {
+  ClinicalOverlayMap,
+  applyOverlayToMap,
+  extractClinicalOverlay,
+  mergeClientsWithOverlay,
+} from './lib/clinicalOverlay';
 
 // Keys
 const STORAGE_KEY_APP_STATE = 'bcba_dashboard_state_v1';
@@ -39,7 +50,7 @@ const STORAGE_KEY_EVENTS_LEGACY = 'bcba_dashboard_events_v2';
 const STORAGE_KEY_CLIENTS_LEGACY = 'bcba_dashboard_clients_v2';
 const STORAGE_KEY_CURRENT_USER = 'bcba_current_user_v1';
 
-export type PrimaryTab = 'today' | 'caseload' | 'notes' | 'supervision' | 'data' | 'toolkit' | 'activity';
+export type PrimaryTab = 'today' | 'caseload' | 'notes' | 'supervision' | 'data' | 'toolkit' | 'activity' | 'staff';
 
 const TAB_TITLES: Record<Exclude<PrimaryTab, 'today'>, string> = {
   caseload: 'Clinical Caseload',
@@ -48,30 +59,66 @@ const TAB_TITLES: Record<Exclude<PrimaryTab, 'today'>, string> = {
   data: 'Data & Progress',
   toolkit: 'Clinical Toolkit',
   activity: 'System Activity',
+  staff: 'Staff Directory',
 };
 
+const clientsApiMode = isApiDomain('clients');
+
+function loadClinicalOverlay(): ClinicalOverlayMap {
+  try {
+    const savedState = localStorage.getItem(STORAGE_KEY_APP_STATE);
+    if (savedState) {
+      const parsed = JSON.parse(savedState);
+      if (parsed.clinicalOverlay) return parsed.clinicalOverlay;
+      if (clientsApiMode && parsed.clients) return extractClinicalOverlay(parsed.clients);
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
 function App() {
+  const queryClient = useQueryClient();
   // Authentication State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
-    // Check for active session
-    const savedUser = localStorage.getItem(STORAGE_KEY_CURRENT_USER);
-    if (savedUser) {
-        setCurrentUser(JSON.parse(savedUser));
+    let cancelled = false;
+    async function checkAuth() {
+      if (isApiDomain('auth')) {
+        try {
+          const user = await authRepo.me();
+          if (!cancelled && user) {
+            await authRepo.refreshCsrf();
+            setCurrentUser(user);
+          }
+        } catch {
+          /* not authenticated */
+        }
+      } else {
+        const savedUser = authRepo.loadLocalUser();
+        if (savedUser) setCurrentUser(savedUser);
+      }
+      if (!cancelled) setAuthChecked(true);
     }
-    setAuthChecked(true);
+    checkAuth();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
-    localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
+    authRepo.persistLocalUser(user);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await authRepo.logout();
+    authRepo.clearLocalUser();
     setCurrentUser(null);
-    localStorage.removeItem(STORAGE_KEY_CURRENT_USER);
+    queryClient.clear();
   };
 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -81,12 +128,11 @@ function App() {
   // Initialize State
   const getInitialState = (): AppState => {
     try {
-      // 1. Try Main State
       const savedState = localStorage.getItem(STORAGE_KEY_APP_STATE);
       if (savedState) {
         const parsed = JSON.parse(savedState);
         return {
-          clients: parsed.clients || INITIAL_CLIENTS,
+          clients: clientsApiMode ? [] : parsed.clients || INITIAL_CLIENTS,
           events: (parsed.events || []).map((e: any) => ({
              ...e,
              start: new Date(e.start),
@@ -97,13 +143,12 @@ function App() {
         };
       }
 
-      // 2. Try Backup State (Safety Net)
       const backupState = localStorage.getItem(`${STORAGE_KEY_APP_STATE}_backup`);
       if (backupState) {
         const parsed = JSON.parse(backupState);
         console.log("Restored from 5-minute backup.");
         return {
-          clients: parsed.clients || INITIAL_CLIENTS,
+          clients: clientsApiMode ? [] : parsed.clients || INITIAL_CLIENTS,
           events: (parsed.events || []).map((e: any) => ({
              ...e,
              start: new Date(e.start),
@@ -114,12 +159,15 @@ function App() {
         };
       }
 
-      // 3. Legacy Migration
       const legacyClients = localStorage.getItem(STORAGE_KEY_CLIENTS_LEGACY);
       const legacyEvents = localStorage.getItem(STORAGE_KEY_EVENTS_LEGACY);
 
       if (legacyClients || legacyEvents) {
-         const clients = legacyClients ? JSON.parse(legacyClients) : INITIAL_CLIENTS;
+         const clients = clientsApiMode
+           ? []
+           : legacyClients
+             ? JSON.parse(legacyClients)
+             : INITIAL_CLIENTS;
          const events = legacyEvents ? JSON.parse(legacyEvents).map((e: any) => ({
              ...e,
              start: new Date(e.start),
@@ -129,20 +177,44 @@ function App() {
       }
     } catch (e) { console.warn(e); }
 
-    return { clients: INITIAL_CLIENTS, events: INITIAL_EVENTS };
+    return { clients: clientsApiMode ? [] : INITIAL_CLIENTS, events: INITIAL_EVENTS };
   };
+
+  const [clinicalOverlay, setClinicalOverlay] = useState<ClinicalOverlayMap>(loadClinicalOverlay);
 
   // Core History State
   const { state: appState, set: setAppState, undo, redo, canUndo, canRedo } = useHistory<AppState>(getInitialState());
-  const { clients, events } = appState;
+
+  const { data: apiClients = [], refetch: refetchClients } = useQuery({
+    queryKey: ['clients'],
+    queryFn: () => clientsRepo.listClients([]),
+    enabled: clientsApiMode && !!currentUser,
+  });
+
+  const clients = useMemo(() => {
+    if (!clientsApiMode) return appState.clients;
+    return mergeClientsWithOverlay(apiClients, clinicalOverlay);
+  }, [appState.clients, apiClients, clinicalOverlay]);
+
+  const mergedAppState = useMemo(
+    () => ({ ...appState, clients }),
+    [appState, clients],
+  );
+
+  const { events } = appState;
+
+  const persistPayload = useMemo(() => {
+    if (!clientsApiMode) return appState;
+    return {
+      events: appState.events,
+      servicePlans: appState.servicePlans,
+      programLibrary: appState.programLibrary,
+      clinicalOverlay,
+    };
+  }, [appState, clinicalOverlay]);
 
   // --- Auto-Save Implementation ---
-  // 1. Real-time Debounced Save (1s delay)
-  const { status: saveStatus, lastSaved } = useAutoSave(STORAGE_KEY_APP_STATE, appState);
-
-  // 2. Periodic Safety Backup (Every 5 minutes)
-  const appStateRef = useRef(appState);
-  useEffect(() => { appStateRef.current = appState; }, [appState]);
+  const { status: saveStatus, lastSaved } = useAutoSave(STORAGE_KEY_APP_STATE, persistPayload);
 
   // Toast System
   const [toasts, setToasts] = useState<{id: string, title: string, message: string, icon?: React.ReactNode, action?: {label: string, onClick: () => void}}[]>([]);
@@ -155,10 +227,18 @@ function App() {
     }, 6000);
   };
 
+  const persistPayloadRef = useRef(persistPayload);
+  useEffect(() => {
+    persistPayloadRef.current = persistPayload;
+  }, [persistPayload]);
+
   useEffect(() => {
     const backupInterval = setInterval(() => {
       try {
-        localStorage.setItem(`${STORAGE_KEY_APP_STATE}_backup`, JSON.stringify(appStateRef.current));
+        localStorage.setItem(
+          `${STORAGE_KEY_APP_STATE}_backup`,
+          JSON.stringify(persistPayloadRef.current),
+        );
         // Visual indicator for the periodic backup
         addToast(
           'Auto-Backup Complete',
@@ -519,68 +599,135 @@ function App() {
     setSelectedClient(null);
   };
 
-  const handleSaveClient = (data: { id?: string; name: string; diagnosis: string; status: Client['status']; imageUrl?: string }) => {
-    if (data.id) {
-        const existing = clients.find(c => c.id === data.id);
+  const updateClientClinical = useCallback(
+    (clientId: string, updater: (client: Client) => Client) => {
+      const client = clients.find((c) => c.id === clientId);
+      if (!client) return;
+      const updated = updater(client);
+      if (clientsApiMode) {
+        setClinicalOverlay((prev) => applyOverlayToMap(prev, clientId, updated));
+      } else {
+        setAppState({
+          ...appState,
+          clients: appState.clients.map((c) => (c.id === clientId ? updated : c)),
+        });
+      }
+    },
+    [clients, clientsApiMode, appState, setAppState],
+  );
+
+  const handleSaveClient = async (data: {
+    id?: string;
+    name: string;
+    diagnosis: string;
+    status: Client['status'];
+    imageUrl?: string;
+  }) => {
+    try {
+      if (clientsApiMode) {
+        if (data.id) {
+          const existing = clients.find((c) => c.id === data.id);
+          if (!existing) return;
+          await clientsRepo.updateClient(data.id, data, existing);
+        } else {
+          await clientsRepo.createClient(data);
+        }
+        await queryClient.invalidateQueries({ queryKey: ['clients'] });
+        logActivity(
+          data.id ? 'UPDATE' : 'CREATE',
+          'CLIENT',
+          `${data.id ? 'Updated' : 'Onboarded'} client: ${data.name}`,
+          data.id,
+        );
+      } else if (data.id) {
+        const existing = clients.find((c) => c.id === data.id);
         if (!existing) return;
         const updatedClient: Client = {
-            ...existing,
-            name: data.name,
-            diagnosis: data.diagnosis,
-            status: data.status,
-            imageUrl: data.imageUrl, // Persist image
-            avatar: data.name.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase()
+          ...existing,
+          name: data.name,
+          diagnosis: data.diagnosis,
+          status: data.status,
+          imageUrl: data.imageUrl,
+          avatar: data.name
+            .split(' ')
+            .map((n) => n[0])
+            .join('')
+            .substring(0, 2)
+            .toUpperCase(),
         };
         setAppState({
-            ...appState,
-            clients: appState.clients.map(c => c.id === data.id ? updatedClient : c)
+          ...appState,
+          clients: appState.clients.map((c) => (c.id === data.id ? updatedClient : c)),
         });
         logActivity('UPDATE', 'CLIENT', `Updated profile for: ${updatedClient.name}`, updatedClient.id);
-    } else {
-        const palette = [
-            { c: 'bg-cyan-100', b: 'border-cyan-400', t: 'text-cyan-900' },
-            { c: 'bg-lime-100', b: 'border-lime-400', t: 'text-lime-900' },
-            { c: 'bg-fuchsia-100', b: 'border-fuchsia-400', t: 'text-fuchsia-900' },
-            { c: 'bg-orange-100', b: 'border-orange-400', t: 'text-orange-900' },
-            { c: 'bg-teal-100', b: 'border-teal-400', t: 'text-teal-900' },
-            { c: 'bg-violet-100', b: 'border-violet-400', t: 'text-violet-900' },
-        ];
-        const color = palette[Math.floor(Math.random() * palette.length)];
-        const initials = data.name.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase();
-        const id = data.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-        const newClient: Client = {
-            id,
-            name: data.name,
-            avatar: initials,
-            color: color.c,
-            borderColor: color.b,
-            textColor: color.t,
-            diagnosis: data.diagnosis,
-            status: data.status,
-            imageUrl: data.imageUrl, // Persist image
-            authorizedHours: 15
-        };
-        setAppState({
-            ...appState,
-            clients: [...appState.clients, newClient]
-        });
+      } else {
+        const { clients: nextClients, client: newClient } = clientsRepo.saveClientLocal(
+          appState.clients,
+          data,
+        );
+        setAppState({ ...appState, clients: nextClients });
         logActivity('CREATE', 'CLIENT', `Onboarded new client: ${newClient.name}`, newClient.id);
-        setActiveClients(prev => [...prev, id]);
+        setActiveClients((prev) => [...prev, newClient.id]);
+      }
+      setIsClientModalOpen(false);
+    } catch (err) {
+      addToast(
+        'Save Failed',
+        err instanceof Error ? err.message : 'Could not save client.',
+        <X size={20} />,
+      );
     }
-    setIsClientModalOpen(false);
   };
 
-  const handleDeleteClient = (id: string) => {
-    const client = clients.find(c => c.id === id);
-    setAppState({
-        ...appState,
-        clients: appState.clients.filter(c => c.id !== id),
-        events: appState.events.filter(e => e.clientId !== id)
-    });
-    if (client) logActivity('DELETE', 'CLIENT', `Archived/Deleted client: ${client.name}`, id);
-    setIsClientModalOpen(false);
-    setSelectedClient(null);
+  const handleDeleteClient = async (id: string) => {
+    const client = clients.find((c) => c.id === id);
+    try {
+      if (clientsApiMode) {
+        if (!client) return;
+        await clientsRepo.lifecycleClient(id, client, 'inactive');
+        await queryClient.invalidateQueries({ queryKey: ['clients'] });
+      } else {
+        setAppState({
+          ...appState,
+          clients: appState.clients.filter((c) => c.id !== id),
+          events: appState.events.filter((e) => e.clientId !== id),
+        });
+      }
+      if (client) logActivity('DELETE', 'CLIENT', `Archived/Deleted client: ${client.name}`, id);
+      setIsClientModalOpen(false);
+      setSelectedClient(null);
+    } catch (err) {
+      addToast(
+        'Delete Failed',
+        err instanceof Error ? err.message : 'Could not archive client.',
+        <X size={20} />,
+      );
+    }
+  };
+
+  const handleImportLocalToApi = async () => {
+    let localClients: Client[] = [];
+    try {
+      const savedState = localStorage.getItem(STORAGE_KEY_APP_STATE);
+      if (savedState) {
+        const parsed = JSON.parse(savedState);
+        localClients = parsed.clients || [];
+      }
+      if (localClients.length === 0) {
+        const legacy = localStorage.getItem(STORAGE_KEY_CLIENTS_LEGACY);
+        if (legacy) localClients = JSON.parse(legacy);
+      }
+      if (localClients.length === 0) localClients = INITIAL_CLIENTS;
+    } catch {
+      localClients = INITIAL_CLIENTS;
+    }
+    const results = await clientsRepo.importLocalClients(localClients);
+    await queryClient.invalidateQueries({ queryKey: ['clients'] });
+    addToast(
+      'Import Complete',
+      `Imported ${results.filter((r) => r.imported).length} client(s) to API.`,
+      <CheckCircle2 size={20} className="text-emerald-500" />,
+    );
   };
 
   // --- Notes: session notes, FBAs, and parent training logs ---
@@ -588,10 +735,10 @@ function App() {
   // participate in the same undo/redo history and autosave as everything else.
 
   const upsertSessionNote = (clientId: string, noteData: Omit<SessionNote, 'id'> & { id?: string }) => {
-    const client = clients.find(c => c.id === clientId);
+    const client = clients.find((c) => c.id === clientId);
     if (!client) return;
     const existing = client.sessionNotes || [];
-    const existingIndex = noteData.id ? existing.findIndex(n => n.id === noteData.id) : -1;
+    const existingIndex = noteData.id ? existing.findIndex((n) => n.id === noteData.id) : -1;
     let updatedNotes: SessionNote[];
     if (existingIndex > -1) {
       updatedNotes = [...existing];
@@ -599,20 +746,26 @@ function App() {
     } else {
       updatedNotes = [...existing, { ...noteData, id: `note_${Date.now()}` } as SessionNote];
     }
-    setAppState({
-      ...appState,
-      clients: appState.clients.map(c => c.id === clientId ? { ...c, sessionNotes: updatedNotes } : c)
-    });
-    logActivity(existingIndex > -1 ? 'UPDATE' : 'CREATE', 'CLIENT', `${existingIndex > -1 ? 'Updated' : 'Saved'} session note for ${client.name} (${noteData.date})`, clientId);
-    addToast('Note Saved', `Session note for ${client.name} saved to their record.`, <CheckCircle2 size={20} className="text-emerald-500" />);
-    setNotesView(prev => prev ? { clientId: prev.clientId, screen: 'list' } : prev);
+    updateClientClinical(clientId, (c) => ({ ...c, sessionNotes: updatedNotes }));
+    logActivity(
+      existingIndex > -1 ? 'UPDATE' : 'CREATE',
+      'CLIENT',
+      `${existingIndex > -1 ? 'Updated' : 'Saved'} session note for ${client.name} (${noteData.date})`,
+      clientId,
+    );
+    addToast(
+      'Note Saved',
+      `Session note for ${client.name} saved to their record.`,
+      <CheckCircle2 size={20} className="text-emerald-500" />,
+    );
+    setNotesView((prev) => (prev ? { clientId: prev.clientId, screen: 'list' } : prev));
   };
 
   const upsertAssessment = (clientId: string, docData: Omit<Assessment, 'id'> & { id?: string }) => {
-    const client = clients.find(c => c.id === clientId);
+    const client = clients.find((c) => c.id === clientId);
     if (!client) return;
     const existing = client.assessments || [];
-    const existingIndex = docData.id ? existing.findIndex(a => a.id === docData.id) : -1;
+    const existingIndex = docData.id ? existing.findIndex((a) => a.id === docData.id) : -1;
     let updated: Assessment[];
     if (existingIndex > -1) {
       updated = [...existing];
@@ -620,20 +773,24 @@ function App() {
     } else {
       updated = [...existing, { ...docData, id: `assessment_${Date.now()}` } as Assessment];
     }
-    setAppState({
-      ...appState,
-      clients: appState.clients.map(c => c.id === clientId ? { ...c, assessments: updated } : c)
-    });
+    updateClientClinical(clientId, (c) => ({ ...c, assessments: updated }));
     logActivity(existingIndex > -1 ? 'UPDATE' : 'CREATE', 'CLIENT', `Saved FBA for ${client.name}`, clientId);
-    addToast('FBA Saved', `Functional Behavior Assessment saved for ${client.name}.`, <CheckCircle2 size={20} className="text-emerald-500" />);
-    setNotesView(prev => prev ? { clientId: prev.clientId, screen: 'list' } : prev);
+    addToast(
+      'FBA Saved',
+      `Functional Behavior Assessment saved for ${client.name}.`,
+      <CheckCircle2 size={20} className="text-emerald-500" />,
+    );
+    setNotesView((prev) => (prev ? { clientId: prev.clientId, screen: 'list' } : prev));
   };
 
-  const upsertParentTrainingLog = (clientId: string, logData: Omit<ParentTrainingLog, 'id'> & { id?: string }) => {
-    const client = clients.find(c => c.id === clientId);
+  const upsertParentTrainingLog = (
+    clientId: string,
+    logData: Omit<ParentTrainingLog, 'id'> & { id?: string },
+  ) => {
+    const client = clients.find((c) => c.id === clientId);
     if (!client) return;
     const existing = client.parentTrainingLogs || [];
-    const existingIndex = logData.id ? existing.findIndex(l => l.id === logData.id) : -1;
+    const existingIndex = logData.id ? existing.findIndex((l) => l.id === logData.id) : -1;
     let updated: ParentTrainingLog[];
     if (existingIndex > -1) {
       updated = [...existing];
@@ -641,13 +798,19 @@ function App() {
     } else {
       updated = [...existing, { ...logData, id: `pt_${Date.now()}` } as ParentTrainingLog];
     }
-    setAppState({
-      ...appState,
-      clients: appState.clients.map(c => c.id === clientId ? { ...c, parentTrainingLogs: updated } : c)
-    });
-    logActivity(existingIndex > -1 ? 'UPDATE' : 'CREATE', 'CLIENT', `Logged parent training for ${client.name}`, clientId);
-    addToast('Parent Training Logged', `Training log saved for ${client.name}.`, <CheckCircle2 size={20} className="text-emerald-500" />);
-    setNotesView(prev => prev ? { clientId: prev.clientId, screen: 'list' } : prev);
+    updateClientClinical(clientId, (c) => ({ ...c, parentTrainingLogs: updated }));
+    logActivity(
+      existingIndex > -1 ? 'UPDATE' : 'CREATE',
+      'CLIENT',
+      `Logged parent training for ${client.name}`,
+      clientId,
+    );
+    addToast(
+      'Parent Training Logged',
+      `Training log saved for ${client.name}.`,
+      <CheckCircle2 size={20} className="text-emerald-500" />,
+    );
+    setNotesView((prev) => (prev ? { clientId: prev.clientId, screen: 'list' } : prev));
   };
 
   // --- Copy/Paste Logic ---
@@ -818,12 +981,14 @@ function App() {
         return <DataOverview clients={clients} events={events} utilizationMetrics={utilizationMetrics} servicePlans={appState.servicePlans || []} />;
       case 'toolkit':
         return <ToolkitHome />;
+      case 'staff':
+        return <StaffView />;
       case 'today':
       default:
         return (
           <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
             <NeedsMyAttentionPanel
-              appState={appState}
+              appState={mergedAppState}
               onOpenNote={(client, noteId) => {
                 setActiveTab('notes');
                 setNotesView({ clientId: client.id, screen: 'note', noteId });
@@ -979,6 +1144,8 @@ function App() {
         onClose={() => setIsSettingsModalOpen(false)}
         workHours={workHours}
         onSave={setWorkHours}
+        showImportToApi={clientsApiMode}
+        onImportLocalToApi={handleImportLocalToApi}
       />
 
       <ClientProfilePanel

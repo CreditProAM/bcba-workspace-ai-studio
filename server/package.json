@@ -10,10 +10,12 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/runSeed.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.4",
+    "argon2": "^0.45.1",
     "dotenv": "^16.5.0",
     "drizzle-orm": "^0.44.2",
     "hono": "^4.8.3",
@@ -21,6 +23,7 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
+    "@types/argon2": "^0.14.1",
     "@types/node": "^22.14.0",
     "drizzle-kit": "^0.31.4",
     "tsx": "^4.20.3",

@@ -1,6 +1,6 @@
 /**
  * Domain cutover registry — authoritative LOCAL | API ownership per domain.
- * Wave 0: all domains LOCAL. Do not switch screens to API in this wave.
+ * Wave 1: auth, clients, staff resolve from VITE_CUTOVER_* env vars.
  */
 
 export type CutoverMode = 'LOCAL' | 'API';
@@ -23,7 +23,13 @@ export type CutoverDomain =
   | 'files'
   | 'ai';
 
-/** Explicit per-domain ownership. Authoritative when set. */
+const WAVE1_ENV_KEYS: Partial<Record<CutoverDomain, string>> = {
+  auth: 'VITE_CUTOVER_AUTH',
+  clients: 'VITE_CUTOVER_CLIENTS',
+  staff: 'VITE_CUTOVER_STAFF',
+};
+
+/** Explicit per-domain ownership for domains not yet env-driven. */
 const DOMAIN_MODE: Record<CutoverDomain, CutoverMode> = {
   auth: 'LOCAL',
   clients: 'LOCAL',
@@ -43,25 +49,24 @@ const DOMAIN_MODE: Record<CutoverDomain, CutoverMode> = {
   ai: 'LOCAL',
 };
 
-/**
- * Emergency/default override from env. Only applied when a domain has not
- * been explicitly flipped in DOMAIN_MODE during a cutover wave.
- * Domain registry remains the migration mechanism — not this global switch.
- */
-function emergencyDefault(): CutoverMode | null {
-  const raw = import.meta.env.VITE_DATA_MODE as string | undefined;
-  if (raw === 'api') return 'API';
-  if (raw === 'local') return 'LOCAL';
+function parseCutoverEnv(raw: string | undefined): CutoverMode | null {
+  if (!raw) return null;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'api') return 'API';
+  if (normalized === 'local') return 'LOCAL';
   return null;
 }
 
-/** Wave 0: always LOCAL (registry all LOCAL). Future waves flip DOMAIN_MODE. */
+function resolveWave1Mode(domain: CutoverDomain): CutoverMode | null {
+  const envKey = WAVE1_ENV_KEYS[domain];
+  if (!envKey) return null;
+  return parseCutoverEnv(import.meta.env[envKey] as string | undefined);
+}
+
 export function getDomainMode(domain: CutoverDomain): CutoverMode {
-  const registered = DOMAIN_MODE[domain];
-  // While all registry entries are LOCAL, ignore emergency API default to
-  // keep AI Studio / offline frontend safe until a domain intentionally cuts over.
-  if (registered === 'LOCAL') return 'LOCAL';
-  return registered;
+  const fromEnv = resolveWave1Mode(domain);
+  if (fromEnv) return fromEnv;
+  return DOMAIN_MODE[domain];
 }
 
 export function isApiDomain(domain: CutoverDomain): boolean {
@@ -74,8 +79,9 @@ export function isLocalDomain(domain: CutoverDomain): boolean {
 
 /** Exposed for tests / future cutover tooling — do not mutate at runtime in UI. */
 export function getCutoverRegistry(): Readonly<Record<CutoverDomain, CutoverMode>> {
-  return { ...DOMAIN_MODE };
+  const registry = { ...DOMAIN_MODE };
+  for (const domain of Object.keys(WAVE1_ENV_KEYS) as CutoverDomain[]) {
+    registry[domain] = getDomainMode(domain);
+  }
+  return registry;
 }
-
-// Reference emergencyDefault so env is documented / tree-shaken safely later.
-void emergencyDefault;

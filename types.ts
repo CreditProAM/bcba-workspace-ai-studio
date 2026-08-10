@@ -35,6 +35,9 @@ export interface Client {
   sessionNotes?: SessionNote[];
   assessments?: Assessment[];
   parentTrainingLogs?: ParentTrainingLog[];
+
+  /** API concurrency token — present when clients domain is API. */
+  rowVersion?: number;
 }
 
 export type ServiceType = 'Direct 1:1' | 'RBT Supervision' | 'Parent Training' | 'Assessment' | 'BIP Review' | 'School Observation';

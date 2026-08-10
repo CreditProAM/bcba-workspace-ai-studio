@@ -28,9 +28,40 @@ export class ApiClientError extends Error {
   }
 }
 
+let csrfToken: string | null = null;
+
+export function setCsrfToken(token: string | null): void {
+  csrfToken = token;
+}
+
+export function getCsrfToken(): string | null {
+  return csrfToken;
+}
+
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+function prepareBody(body: unknown): { body: BodyInit | undefined; headers: Headers } {
+  const headers = new Headers();
+  if (body === undefined || body === null) {
+    return { body: undefined, headers };
+  }
+  if (typeof body === 'string' || typeof body === 'object') {
+    if (!headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
+    const serialized = typeof body === 'string' ? body : JSON.stringify(body);
+    return { body: serialized, headers };
+  }
+  return { body: body as BodyInit, headers };
+}
+
+export type ApiFetchInit = Omit<RequestInit, 'body'> & {
+  body?: unknown;
+};
+
 export async function apiFetch<T = unknown>(
   path: string,
-  init: RequestInit = {},
+  init: ApiFetchInit = {},
 ): Promise<T> {
   const base = apiBaseUrl();
   if (!base) {
@@ -45,24 +76,39 @@ export async function apiFetch<T = unknown>(
   const headers = new Headers(init.headers);
   if (!headers.has('Accept')) headers.set('Accept', 'application/json');
 
+  const method = (init.method ?? 'GET').toUpperCase();
+  if (MUTATING_METHODS.has(method)) {
+    const token = getCsrfToken();
+    if (token && !headers.has('X-CSRF-Token')) {
+      headers.set('X-CSRF-Token', token);
+    }
+  }
+
+  const { body, headers: bodyHeaders } = prepareBody(init.body);
+  bodyHeaders.forEach((value, key) => {
+    if (!headers.has(key)) headers.set(key, value);
+  });
+
   const response = await fetch(url, {
     ...init,
+    method,
+    body,
     headers,
     credentials: 'include',
   });
 
   const text = await response.text();
-  let body: unknown = undefined;
+  let parsed: unknown = undefined;
   if (text) {
     try {
-      body = JSON.parse(text);
+      parsed = JSON.parse(text);
     } catch {
-      body = text;
+      parsed = text;
     }
   }
 
   if (!response.ok) {
-    const err = body as ApiErrorBody | undefined;
+    const err = parsed as ApiErrorBody | undefined;
     throw new ApiClientError(
       response.status,
       err?.error?.code ?? 'HTTP_ERROR',
@@ -70,14 +116,14 @@ export async function apiFetch<T = unknown>(
     );
   }
 
-  return body as T;
+  return parsed as T;
 }
 
 export type HealthResponse = {
   ok: boolean;
   service: string;
   version: string;
-  db: 'up' | 'down' | 'unknown';
+  db?: 'up' | 'down' | 'unknown';
 };
 
 export function getHealth(): Promise<HealthResponse> {
